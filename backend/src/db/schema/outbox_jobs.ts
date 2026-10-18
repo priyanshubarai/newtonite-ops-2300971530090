@@ -1,5 +1,5 @@
 import { pgTable, text, timestamp, uuid, jsonb, integer, index } from "drizzle-orm/pg-core";
-import { outboxStatusEnum } from "./enums";
+import { outboxStatusEnum } from "./enums.js";
 
 export const outboxJobs = pgTable(
   "outbox_jobs",

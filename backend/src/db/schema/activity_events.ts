@@ -1,7 +1,7 @@
 import { pgTable, timestamp, uuid, jsonb, index } from "drizzle-orm/pg-core";
-import { workItems } from "./work_items";
-import { users } from "./users";
-import { activityEventTypeEnum } from "./enums";
+import { workItems } from "./work_items.js";
+import { users } from "./users.js";
+import { activityEventTypeEnum } from "./enums.js";
 
 export const activityEvents = pgTable(
   "activity_events",

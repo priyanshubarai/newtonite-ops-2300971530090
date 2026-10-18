@@ -1,7 +1,7 @@
 import { pgTable, text, timestamp, uuid, integer, index, foreignKey } from "drizzle-orm/pg-core";
-import { users } from "./users";
-import { teams } from "./teams";
-import { workItemTypeEnum, workPriorityEnum, workStatusEnum } from "./enums";
+import { users } from "./users.js";
+import { teams } from "./teams.js";
+import { workItemTypeEnum, workPriorityEnum, workStatusEnum } from "./enums.js";
 
 export const workItems = pgTable(
   "work_items",

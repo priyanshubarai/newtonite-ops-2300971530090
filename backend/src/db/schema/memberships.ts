@@ -1,7 +1,7 @@
 import { pgTable, timestamp, uuid, uniqueIndex, index } from "drizzle-orm/pg-core";
-import { users } from "./users";
-import { teams } from "./teams";
-import { teamRoleEnum } from "./enums";
+import { users } from "./users.js";
+import { teams } from "./teams.js";
+import { teamRoleEnum } from "./enums.js";
 
 export const userTeamMemberships = pgTable(
   "user_team_memberships",

@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid, jsonb, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
-import { idempotencyStateEnum } from "./enums";
-import { users } from "./users";
+import { idempotencyStateEnum } from "./enums.js";
+import { users } from "./users.js";
 
 export const idempotencyRecords = pgTable(
   "idempotency_records",

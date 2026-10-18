@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid, index } from "drizzle-orm/pg-core";
-import { workItems } from "./work_items";
-import { users } from "./users";
+import { workItems } from "./work_items.js";
+import { users } from "./users.js";
 
 export const comments = pgTable(
   "comments",
