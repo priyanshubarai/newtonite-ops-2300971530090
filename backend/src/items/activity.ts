@@ -124,3 +124,10 @@ export function statusChangedEvent(before: string, after: string): DerivedEvent 
 export function itemCreatedEvent(row: WorkItemRow): DerivedEvent {
   return { eventType: "ITEM_CREATED", metadata: { after: itemSnapshot(row) } };
 }
+
+export function commentAddedEvent(commentId: string, authorId: string): DerivedEvent {
+  return {
+    eventType: "COMMENT_ADDED",
+    metadata: { commentId, authorId },
+  };
+}

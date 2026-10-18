@@ -23,6 +23,16 @@ async function renderDetail(
   setToken("session-token");
   mockSession(mock, { memberships });
   mock.on("GET", ITEM_PATH, () => ({ status: 200, body: item }));
+  // Mock activity endpoint to return empty activity by default
+  mock.on("GET", new RegExp(`/items/${item.id}/activity`), () => ({
+    status: 200,
+    body: { items: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0, hasNextPage: false, hasPrevPage: false } },
+  }));
+  // Mock comments endpoint to return empty comments by default
+  mock.on("GET", new RegExp(`/items/${item.id}/comments`), () => ({
+    status: 200,
+    body: { items: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0, hasNextPage: false, hasPrevPage: false } },
+  }));
   renderApp({ route: `/items/${item.id}` });
   await screen.findByRole("heading", { name: item.title });
 }
@@ -37,8 +47,8 @@ describe("ItemDetailPage", () => {
     expect(screen.getByText("Checkout error rate is elevated.")).toBeInTheDocument();
     expect(screen.getByText("Payments")).toBeInTheDocument();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
-    // No activity-read endpoint exists; none is requested.
-    expect(mock.calls.every((call) => !call.path.includes("activity"))).toBe(true);
+    // Activity is now requested.
+    expect(mock.calls.some((call) => call.path.includes("activity"))).toBe(true);
   });
 
   it("claims an unassigned item and refreshes the view", async () => {
@@ -192,7 +202,9 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /claim this item/i }));
 
-    expect(await screen.findByText(/could not reach the server/i)).toBeInTheDocument();
+    // The error appears in the alert with role="alert"
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/could not reach the server/i);
     expect(screen.queryByText(/you claimed this work item/i)).not.toBeInTheDocument();
     // No success toast should appear
     expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
@@ -225,7 +237,9 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /start progress/i }));
 
-    expect(await screen.findByText(/could not reach the server/i)).toBeInTheDocument();
+    // The error appears in the alert with role="alert"
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/could not reach the server/i);
     expect(screen.queryByText(/moved to in progress/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
   });

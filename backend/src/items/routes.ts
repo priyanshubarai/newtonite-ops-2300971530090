@@ -4,15 +4,21 @@ import { asyncHandler, badRequest, notFound } from "../common/errors.js";
 import { runIdempotentMutation } from "../common/idempotency.js";
 import {
   claimItem,
+  createComment,
   createItem,
   getItem,
+  listActivity,
+  listComments,
   listItems,
   transitionItem,
   updateItem,
 } from "./service.js";
 import {
+  createCommentSchema,
   createItemSchema,
   itemIdSchema,
+  listActivityQuerySchema,
+  listCommentsQuerySchema,
   listItemsQuerySchema,
   transitionItemSchema,
   updateItemSchema,
@@ -40,6 +46,7 @@ const OPERATIONS = {
   update: "PATCH /items/:id",
   claim: "POST /items/:id/claim",
   transition: "POST /items/:id/transition",
+  comment: "POST /items/:id/comments",
 } as const;
 
 // Validate `:id` as a UUID before touching the database. A malformed id fails
@@ -97,6 +104,55 @@ itemsRouter.get(
     const id = requireItemId(req.params.id);
     const item = await getItem(req.user!.id, id);
     res.status(200).json(item);
+  }),
+);
+
+// GET /items/:id/activity - activity history for a work item.
+itemsRouter.get(
+  "/:id/activity",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = requireItemId(req.params.id);
+    const parsed = listActivityQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw badRequest("Invalid query parameters", parsed.error.flatten().fieldErrors);
+    }
+    const activity = await listActivity(req.user!.id, id, parsed.data.page, parsed.data.pageSize);
+    res.status(200).json(activity);
+  }),
+);
+
+// GET /items/:id/comments - comments for a work item.
+itemsRouter.get(
+  "/:id/comments",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = requireItemId(req.params.id);
+    const parsed = listCommentsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw badRequest("Invalid query parameters", parsed.error.flatten().fieldErrors);
+    }
+    const comments = await listComments(req.user!.id, id, parsed.data.page, parsed.data.pageSize);
+    res.status(200).json(comments);
+  }),
+);
+
+// POST /items/:id/comments - create a comment on a work item.
+itemsRouter.post(
+  "/:id/comments",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = requireItemId(req.params.id);
+
+    const parsed = createCommentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw badRequest("Invalid request body", parsed.error.flatten().fieldErrors);
+    }
+
+    await runIdempotentMutation(req, res, OPERATIONS.comment, parsed.data, async (tx) => ({
+      status: 201,
+      body: await createComment(tx, req.user!.id, id, parsed.data),
+    }));
   }),
 );
 

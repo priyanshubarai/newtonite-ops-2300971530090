@@ -102,6 +102,7 @@ export interface ItemFilters {
   priority?: WorkPriority;
   assigneeId?: string;
   search?: string;
+  preset?: "assigned" | "unassigned_urgent" | "awaiting_approval";
   page?: number;
   pageSize?: number;
   sort?: SortField;

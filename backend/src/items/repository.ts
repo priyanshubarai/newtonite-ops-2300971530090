@@ -3,6 +3,7 @@ import { db, type TxClient } from "../db/index.js";
 import { workItems } from "../db/schema/work_items.js";
 import { activityEvents } from "../db/schema/activity_events.js";
 import { outboxJobs } from "../db/schema/outbox_jobs.js";
+import { comments } from "../db/schema/comments.js";
 import type {
   SortDirection,
   SortField,
@@ -46,6 +47,7 @@ export interface ListWorkItemsParams {
   priority?: WorkPriority;
   assigneeId?: string;
   search?: string;
+  preset?: "assigned" | "unassigned_urgent" | "awaiting_approval";
   page: number;
   pageSize: number;
   sort: SortField;
@@ -70,23 +72,38 @@ function escapeLikePattern(value: string): string {
 function buildFilters(params: ListWorkItemsParams): SQL {
   const conditions: SQL[] = [inArray(workItems.teamId, params.memberTeamIds)];
 
-  if (params.status) {
-    conditions.push(eq(workItems.status, params.status));
-  }
-  if (params.priority) {
-    conditions.push(eq(workItems.priority, params.priority));
-  }
-  if (params.assigneeId) {
-    conditions.push(eq(workItems.assigneeId, params.assigneeId));
-  }
-  if (params.search) {
-    const pattern = `%${escapeLikePattern(params.search)}%`;
-    const searchCondition = or(
-      ilike(workItems.title, pattern),
-      ilike(workItems.description, pattern),
-    );
-    if (searchCondition) {
-      conditions.push(searchCondition);
+  if (params.preset === "assigned") {
+    // Assigned to the current user - this will be handled in the service layer
+    // where we have access to the userId. We pass it through as a special marker.
+    conditions.push(sql`${workItems.assigneeId} = ${params.assigneeId!}`);
+  } else if (params.preset === "unassigned_urgent") {
+    // Unassigned urgent items: assigneeId IS NULL AND priority IN ('HIGH', 'CRITICAL')
+    conditions.push(isNull(workItems.assigneeId));
+    conditions.push(inArray(workItems.priority, ["HIGH", "CRITICAL"] as const));
+  } else if (params.preset === "awaiting_approval") {
+    // Awaiting my approval: status = 'AWAITING_APPROVAL' AND user has LEAD/ADMIN role
+    // The role check is done in the service layer
+    conditions.push(eq(workItems.status, "AWAITING_APPROVAL" as WorkStatus));
+  } else {
+    // Normal filters (not using a preset)
+    if (params.status) {
+      conditions.push(eq(workItems.status, params.status));
+    }
+    if (params.priority) {
+      conditions.push(eq(workItems.priority, params.priority));
+    }
+    if (params.assigneeId) {
+      conditions.push(eq(workItems.assigneeId, params.assigneeId));
+    }
+    if (params.search) {
+      const pattern = `%${escapeLikePattern(params.search)}%`;
+      const searchCondition = or(
+        ilike(workItems.title, pattern),
+        ilike(workItems.description, pattern),
+      );
+      if (searchCondition) {
+        conditions.push(searchCondition);
+      }
     }
   }
 
@@ -264,6 +281,79 @@ export async function insertActivityEventTx(
   values: NewActivityEvent,
 ): Promise<void> {
   await tx.insert(activityEvents).values(values);
+}
+
+/**
+ * List activity events for a work item with pagination.
+ */
+export async function listActivityEvents(
+  workItemId: string,
+  page: number,
+  pageSize: number,
+): Promise<{ rows: typeof activityEvents.$inferSelect[]; total: number }> {
+  if (page < 1) page = 1;
+  if (pageSize < 1) pageSize = 20;
+  if (pageSize > 100) pageSize = 100;
+
+  const offset = (page - 1) * pageSize;
+
+  const [rows, totalRows] = await Promise.all([
+    db
+      .select()
+      .from(activityEvents)
+      .where(eq(activityEvents.workItemId, workItemId))
+      .orderBy(desc(activityEvents.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(activityEvents)
+      .where(eq(activityEvents.workItemId, workItemId)),
+  ]);
+
+  return { rows, total: totalRows[0]?.value ?? 0 };
+}
+
+/** Append an immutable activity event on the caller's transaction. */
+
+/**
+ * Create a comment on a work item.
+ */
+export async function insertCommentTx(
+  tx: TxClient,
+  values: typeof comments.$inferInsert,
+): Promise<typeof comments.$inferSelect> {
+  const [row] = await tx.insert(comments).values(values).returning();
+  return row;
+}
+
+/**
+ * List comments for a work item with pagination.
+ */
+export async function listCommentsRepo(
+  workItemId: string,
+  page: number,
+  pageSize: number,
+): Promise<{ rows: typeof comments.$inferSelect[]; total: number }> {
+  if (page < 1) page = 1;
+  if (pageSize < 1) pageSize = 20;
+  if (pageSize > 100) pageSize = 100;
+
+  const [rows, totalRows] = await Promise.all([
+    db
+      .select()
+      .from(comments)
+      .where(eq(comments.workItemId, workItemId))
+      .orderBy(asc(comments.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(comments)
+      .where(eq(comments.workItemId, workItemId)),
+  ]);
+
+  return { rows, total: totalRows[0]?.value ?? 0 };
 }
 
 /** Insert a transactional-outbox job on the caller's transaction. */

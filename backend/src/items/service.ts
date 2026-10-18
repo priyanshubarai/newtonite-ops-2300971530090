@@ -6,8 +6,11 @@ import {
   claimWorkItemTx,
   findWorkItemById,
   insertActivityEventTx,
+  insertCommentTx,
   insertOutboxJobTx,
   insertWorkItemTx,
+  listActivityEvents,
+  listCommentsRepo,
   listWorkItems,
   transitionWorkItemTx,
   updateWorkItemTx,
@@ -16,6 +19,7 @@ import {
 } from "./repository.js";
 import {
   assigneeChangedEvent,
+  commentAddedEvent,
   deriveUpdateEvents,
   itemCreatedEvent,
   statusChangedEvent,
@@ -29,7 +33,10 @@ import {
   isApprovalStep,
 } from "./workflow.js";
 import type {
+  CreateCommentInput,
   CreateItemInput,
+  ListActivityQuery,
+  ListCommentsQuery,
   ListItemsQuery,
   TransitionItemInput,
   UpdateItemInput,
@@ -114,12 +121,44 @@ export async function listItems(
     scopedTeamIds = memberTeamIds;
   }
 
+  // Handle dashboard presets
+  let assigneeId = query.assigneeId;
+  let status = query.status;
+  let priority = query.priority;
+  const preset = query.preset;
+
+  if (preset === "assigned") {
+    // Assigned to me: filter by current user's ID
+    assigneeId = userId;
+    status = undefined;
+    priority = undefined;
+  } else if (preset === "unassigned_urgent") {
+    // Unassigned urgent: unassigned + HIGH/CRITICAL priority
+    // Use empty string as a marker for "IS NULL" - will be handled in repository
+    assigneeId = "";
+    priority = undefined; // Handled by preset in repository
+    status = undefined;
+  } else if (preset === "awaiting_approval") {
+    // Awaiting my approval: only show if user has LEAD/ADMIN in at least one team
+    const hasApprovalRole = memberships.some(
+      (m) => m.role === "LEAD" || m.role === "ADMIN"
+    );
+    if (!hasApprovalRole) {
+      // User doesn't have approval role in any team - return empty
+      return toPage([], 0, query.page, query.pageSize);
+    }
+    status = "AWAITING_APPROVAL";
+    assigneeId = undefined;
+    priority = undefined;
+  }
+
   const { rows, total } = await listWorkItems({
     memberTeamIds: scopedTeamIds,
-    status: query.status,
-    priority: query.priority,
-    assigneeId: query.assigneeId,
+    status,
+    priority,
+    assigneeId,
     search: query.search,
+    preset,
     page: query.page,
     pageSize: query.pageSize,
     sort: query.sort,
@@ -127,6 +166,124 @@ export async function listItems(
   });
 
   return toPage(rows, total, query.page, query.pageSize);
+}
+
+/**
+ * List activity events for a work item.
+ *
+ * Authorization: caller must be a member of the item's team.
+ */
+export async function listActivity(
+  userId: string,
+  itemId: string,
+  page: number,
+  pageSize: number,
+): Promise<{ items: unknown[]; pagination: { page: number; pageSize: number; total: number; totalPages: number; hasNextPage: boolean; hasPrevPage: boolean } }> {
+  // First verify the item exists and user has access
+  const item = await getItem(userId, itemId);
+  
+  const { rows, total } = await listActivityEvents(itemId, page, pageSize);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+  
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      workItemId: row.workItemId,
+      actorId: row.actorId,
+      eventType: row.eventType,
+      metadata: row.metadata,
+      createdAt: row.createdAt.toISOString(),
+    })),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+/**
+ * List comments for a work item.
+ *
+ * Authorization: caller must be a member of the item's team.
+ */
+export async function listComments(
+  userId: string,
+  itemId: string,
+  page: number,
+  pageSize: number,
+): Promise<{ items: unknown[]; pagination: { page: number; pageSize: number; total: number; totalPages: number; hasNextPage: boolean; hasPrevPage: boolean } }> {
+  // First verify the item exists and user has access
+  const item = await getItem(userId, itemId);
+
+  const { rows, total } = await listCommentsRepo(itemId, page, pageSize);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      workItemId: row.workItemId,
+      authorId: row.authorId,
+      body: row.body,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    })),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+/**
+ * Create a comment on a work item.
+ *
+ * Authorization: caller must be a member of the item's team.
+ * The comment creation is recorded as an activity event in the same transaction.
+ */
+export async function createComment(
+  tx: TxClient,
+  userId: string,
+  itemId: string,
+  input: CreateCommentInput,
+): Promise<{ comment: { id: string; workItemId: string; authorId: string; body: string; createdAt: string; updatedAt: string } }> {
+  // First verify the item exists and user has access
+  const item = await getItem(userId, itemId);
+
+  const comment = await insertCommentTx(tx, {
+    workItemId: itemId,
+    authorId: userId,
+    body: input.body,
+  });
+
+  // Record the comment as an activity event in the same transaction
+  await insertActivityEventTx(tx, {
+    workItemId: itemId,
+    actorId: userId,
+    eventType: "COMMENT_ADDED",
+    metadata: { commentId: comment.id, authorId: userId },
+  });
+
+  // Also insert outbox job for the comment
+  await insertOutboxJobTx(tx, buildOutboxJob(item, OUTBOX_JOB_TYPES.ITEM_UPDATED, userId));
+
+  return {
+    comment: {
+      id: comment.id,
+      workItemId: comment.workItemId,
+      authorId: comment.authorId,
+      body: comment.body,
+      createdAt: comment.createdAt.toISOString(),
+      updatedAt: comment.updatedAt.toISOString(),
+    },
+  };
 }
 
 /**
@@ -150,7 +307,9 @@ export async function getItem(userId: string, id: string): Promise<WorkItemRespo
   return toWorkItemResponse(row);
 }
 
-/** Append every derived activity event and one outbox job for a mutation. */
+/**
+ * Append every derived activity event and one outbox job for a mutation.
+ */
 async function recordMutation(
   tx: TxClient,
   row: WorkItemRow,

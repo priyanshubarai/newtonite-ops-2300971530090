@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { claimItem, getItem, transitionItem } from "../api/items";
+import { claimItem, createComment, getItem, listActivity, listComments, transitionItem } from "../api/items";
 import { useStableIdempotencyKey } from "../api/idempotency";
 import { isApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Alert } from "../components/Alert";
 import { PriorityBadge, StatusBadge, TypeBadge } from "../components/Badges";
-import { ErrorState, LoadingState } from "../components/StateViews";
+import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import {
   CLAIMABLE_STATUSES,
   ROLE_LABELS,
@@ -46,7 +46,23 @@ export function ItemDetailPage() {
     retry: false,
   });
 
+  const activityQuery = useQuery({
+    queryKey: ["activity", id],
+    queryFn: ({ signal }) => listActivity(id, 1, 20, signal),
+    enabled: id.length > 0,
+    retry: false,
+  });
+
+  const commentsQuery = useQuery({
+    queryKey: ["comments", id],
+    queryFn: ({ signal }) => listComments(id, 1, 20, signal),
+    enabled: id.length > 0,
+    retry: false,
+  });
+
   const item = itemQuery.data;
+  const activity = activityQuery.data;
+  const comments = commentsQuery.data;
   const next = item ? WORKFLOW_NEXT[item.status] : null;
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -113,6 +129,24 @@ export function ItemDetailPage() {
             ? "Only a team lead or admin can approve this transition."
             : "Your role in this team doesn't permit that transition.",
         );
+      } else {
+        setActionError(errorMessage(error));
+      }
+    },
+  });
+
+  const commentKey = useStableIdempotencyKey(`comment:${id}`);
+  const commentMutation = useMutation({
+    mutationFn: (body: string) => createComment(id, { body }, commentKey),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comments", id] });
+      setActionError(null);
+      setActionMessage("Comment added.");
+    },
+    onError: (error) => {
+      setActionMessage(null);
+      if (isForbidden(error)) {
+        setActionError("Your role in this team doesn't allow adding comments.");
       } else {
         setActionError(errorMessage(error));
       }
@@ -351,10 +385,202 @@ export function ItemDetailPage() {
         </dl>
       </section>
 
-      <p className="muted note">
-        Activity history isn't available in this phase — the backend exposes no activity-read
-        endpoint.
-      </p>
+      <section className="card" aria-labelledby="detail-activity-heading">
+        <h2 id="detail-activity-heading" className="card__title">
+          Activity
+        </h2>
+        {activityQuery.isPending && <LoadingState message="Loading activity…" />}
+        {activityQuery.isError && (
+          <ErrorState
+            title="Couldn't load activity"
+            message={errorMessage(activityQuery.error)}
+            onRetry={() => void activityQuery.refetch()}
+          />
+        )}
+        {activity && activity.items.length === 0 && (
+          <EmptyState
+            title="No activity yet"
+            message="Activity will appear here when this item is updated."
+          />
+        )}
+        {activity && activity.items.length > 0 && (
+          <>
+            <dl className="activity-timeline">
+              {activity.items.map((event) => (
+                <div key={event.id} className="activity-event">
+                  <div className="activity-event__meta">
+                    <span className="activity-event__type">{formatEventType(event.eventType)}</span>
+                    <time className="activity-event__time" dateTime={event.createdAt}>
+                      {formatDateTime(event.createdAt)}
+                    </time>
+                  </div>
+                  <div className="activity-event__details">
+                    {renderEventDetails(event)}
+                  </div>
+                </div>
+              ))}
+            </dl>
+            {activity.pagination.hasNextPage && (
+              <p className="muted note">
+                Showing latest 20 events. Older activity available via API.
+              </p>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="detail-comments-heading">
+        <h2 id="detail-comments-heading" className="card__title">
+          Comments
+        </h2>
+        {commentsQuery.isPending && <LoadingState message="Loading comments…" />}
+        {commentsQuery.isError && (
+          <ErrorState
+            title="Couldn't load comments"
+            message={errorMessage(commentsQuery.error)}
+            onRetry={() => void commentsQuery.refetch()}
+          />
+        )}
+        {comments && comments.items.length === 0 && (
+          <EmptyState
+            title="No comments yet"
+            message="Be the first to add a comment."
+          />
+        )}
+        {comments && comments.items.length > 0 && (
+          <>
+            <dl className="comments-list">
+              {comments.items.map((comment) => (
+                <div key={comment.id} className="comment">
+                  <div className="comment__header">
+                    <span className="comment__author">User {comment.authorId}</span>
+                    <time className="comment__time" dateTime={comment.createdAt}>
+                      {formatDateTime(comment.createdAt)}
+                    </time>
+                  </div>
+                  <div className="comment__body">{comment.body}</div>
+                </div>
+              ))}
+            </dl>
+            {comments.pagination.hasNextPage && (
+              <p className="muted note">
+                Showing latest 20 comments. Older comments available via API.
+              </p>
+            )}
+          </>
+        )}
+        <form
+          className="comment-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            const body = formData.get("body") as string;
+            if (body.trim()) {
+              commentMutation.mutate(body);
+              e.currentTarget.reset();
+            }
+          }}
+        >
+          <div className="form-field">
+            <label htmlFor="comment-body" className="form-field__label">
+              Add a comment
+            </label>
+            <textarea
+              id="comment-body"
+              name="body"
+              className="form-field__input form-field__input--textarea"
+              rows={3}
+              placeholder="Write a comment…"
+              disabled={commentMutation.isPending}
+              aria-busy={commentMutation.isPending}
+              required
+              maxLength={5000}
+            />
+          </div>
+          <button
+            type="submit"
+            className="button button--primary"
+            disabled={commentMutation.isPending || !item}
+            aria-busy={commentMutation.isPending}
+          >
+            {commentMutation.isPending ? "Posting…" : "Post comment"}
+          </button>
+        </form>
+      </section>
     </div>
   );
+}
+
+/** Convert backend event type to human-readable label. */
+function formatEventType(type: string): string {
+  const labels: Record<string, string> = {
+    ITEM_CREATED: "Created",
+    STATUS_CHANGED: "Status changed",
+    ASSIGNEE_CHANGED: "Assignee changed",
+    PRIORITY_CHANGED: "Priority changed",
+    ITEM_UPDATED: "Updated",
+    COMMENT_ADDED: "Comment added",
+  };
+  return labels[type] ?? type;
+}
+
+/** Render human-readable details for an activity event. */
+function renderEventDetails(event: { eventType: string; metadata: Record<string, unknown> }): React.ReactNode {
+  const { metadata } = event;
+  const before = metadata.before as Record<string, unknown> | undefined;
+  const after = metadata.after as Record<string, unknown> | undefined;
+  const via = metadata.via as string | undefined;
+  switch (event.eventType) {
+    case "ITEM_CREATED": {
+      if (!after) return null;
+      return (
+        <dl className="activity-details">
+          <div><dt>Title</dt><dd>{after.title as string}</dd></div>
+          <div><dt>Type</dt><dd>{after.type as string}</dd></div>
+          <div><dt>Priority</dt><dd>{after.priority as string}</dd></div>
+          <div><dt>Status</dt><dd>{after.status as string}</dd></div>
+        </dl>
+      );
+    }
+    case "STATUS_CHANGED": {
+      return (
+        <dl className="activity-details">
+          <div><dt>From</dt><dd>{before?.status as string | undefined}</dd></div>
+          <div><dt>To</dt><dd>{after?.status as string | undefined}</dd></div>
+        </dl>
+      );
+    }
+    case "ASSIGNEE_CHANGED": {
+      return (
+        <dl className="activity-details">
+          <div><dt>From</dt><dd>{before?.assigneeId ? `User ${before.assigneeId as string}` : "Unassigned"}</dd></div>
+          <div><dt>To</dt><dd>{after?.assigneeId ? `User ${after.assigneeId as string}` : "Unassigned"}</dd></div>
+          {via && <div><dt>Via</dt><dd>{via === "claim" ? "Claim" : "Assignment"}</dd></div>}
+        </dl>
+      );
+    }
+    case "PRIORITY_CHANGED": {
+      return (
+        <dl className="activity-details">
+          <div><dt>From</dt><dd>{before?.priority as string | undefined}</dd></div>
+          <div><dt>To</dt><dd>{after?.priority as string | undefined}</dd></div>
+        </dl>
+      );
+    }
+    case "ITEM_UPDATED": {
+      if (!before || !after) return null;
+      const changedKeys = Object.keys(after).filter((k) => before[k] !== after[k]);
+      return (
+        <dl className="activity-details">
+          {changedKeys.map((key) => (
+            <div key={key}><dt>{key}</dt><dd>{before[key] as string} → {after[key] as string}</dd></div>
+          ))}
+        </dl>
+      );
+    }
+    default:
+      return (
+        <pre className="activity-details--raw">{JSON.stringify(metadata, null, 2)}</pre>
+      );
+  }
 }

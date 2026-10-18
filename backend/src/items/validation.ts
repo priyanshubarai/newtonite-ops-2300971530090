@@ -46,6 +46,7 @@ export const listItemsQuerySchema = z.object({
     .trim()
     .max(SEARCH_MAX_LENGTH, `search must be at most ${SEARCH_MAX_LENGTH} characters`)
     .optional(),
+  preset: z.enum(["assigned", "unassigned_urgent", "awaiting_approval"]).optional(),
   page: z.coerce
     .number()
     .int("page must be an integer")
@@ -151,6 +152,48 @@ export const transitionItemSchema = z
   })
   .strict();
 export type TransitionItemInput = z.infer<typeof transitionItemSchema>;
+
+/** `GET /items/:id/activity` query contract. */
+export const listActivityQuerySchema = z.object({
+  page: z.coerce
+    .number()
+    .int("page must be an integer")
+    .min(1, "page must be at least 1")
+    .max(Number.MAX_SAFE_INTEGER, "page is too large")
+    .default(1),
+  pageSize: z.coerce
+    .number()
+    .int("pageSize must be an integer")
+    .min(1, "pageSize must be at least 1")
+    .max(PAGE_SIZE_MAX, `pageSize must be at most ${PAGE_SIZE_MAX}`)
+    .default(PAGE_SIZE_DEFAULT),
+});
+export type ListActivityQuery = z.infer<typeof listActivityQuerySchema>;
+
+/** `POST /items/:id/comments` body. */
+export const createCommentSchema = z
+  .object({
+    body: z.string().min(1, "Comment body is required").max(5000, "Comment body is too long"),
+  })
+  .strict();
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+/** `GET /items/:id/comments` query contract. */
+export const listCommentsQuerySchema = z.object({
+  page: z.coerce
+    .number()
+    .int("page must be an integer")
+    .min(1, "page must be at least 1")
+    .max(Number.MAX_SAFE_INTEGER, "page is too large")
+    .default(1),
+  pageSize: z.coerce
+    .number()
+    .int("pageSize must be an integer")
+    .min(1, "pageSize must be at least 1")
+    .max(PAGE_SIZE_MAX, `pageSize must be at most ${PAGE_SIZE_MAX}`)
+    .default(PAGE_SIZE_DEFAULT),
+});
+export type ListCommentsQuery = z.infer<typeof listCommentsQuerySchema>;
 
 /** Route param contract for `/items/:id`. */
 export const itemIdSchema = z.string().uuid("id must be a valid UUID");

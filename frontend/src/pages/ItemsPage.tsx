@@ -33,6 +33,7 @@ interface AppliedFilters {
   priority: WorkPriority | "";
   assigneeId: string;
   search: string;
+  preset: "assigned" | "unassigned_urgent" | "awaiting_approval" | "";
   sort: SortField;
   order: SortDirection;
   pageSize: number;
@@ -45,6 +46,7 @@ const INITIAL_FILTERS: AppliedFilters = {
   priority: "",
   assigneeId: "",
   search: "",
+  preset: "",
   sort: "updatedAt",
   order: "desc",
   pageSize: DEFAULT_PAGE_SIZE,
@@ -104,12 +106,13 @@ export function ItemsPage() {
     const priority = params.get("priority") ?? "";
     const assigneeId = params.get("assigneeId") ?? "";
     const search = params.get("search") ?? "";
+    const preset = params.get("preset") ?? "";
     const page = Math.max(1, Number(params.get("page")) || 1);
     const pageSize = Math.max(1, Math.min(100, Number(params.get("pageSize")) || DEFAULT_PAGE_SIZE));
     const { sort, order } = parseSortValue(params.get("sort"));
 
     // Only update if URL has non-default values to avoid unnecessary re-renders.
-    const hasUrlState = teamId || status || priority || assigneeId || search || page !== 1 || pageSize !== DEFAULT_PAGE_SIZE || sort !== "updatedAt" || order !== "desc";
+    const hasUrlState = teamId || status || priority || assigneeId || search || preset || page !== 1 || pageSize !== DEFAULT_PAGE_SIZE || sort !== "updatedAt" || order !== "desc";
     if (hasUrlState) {
       setText({ search, assigneeId });
       setApplied({
@@ -118,6 +121,7 @@ export function ItemsPage() {
         priority: priority as WorkPriority | "",
         assigneeId,
         search,
+        preset: preset as "assigned" | "unassigned_urgent" | "awaiting_approval" | "",
         sort,
         order,
         pageSize,
@@ -152,6 +156,7 @@ export function ItemsPage() {
     if (applied.priority) nextParams.set("priority", applied.priority);
     if (applied.assigneeId) nextParams.set("assigneeId", applied.assigneeId);
     if (applied.search) nextParams.set("search", applied.search);
+    if (applied.preset) nextParams.set("preset", applied.preset);
     if (applied.page !== 1) nextParams.set("page", String(applied.page));
     if (applied.pageSize !== DEFAULT_PAGE_SIZE) nextParams.set("pageSize", String(applied.pageSize));
     if (applied.sort !== "updatedAt" || applied.order !== "desc") {
@@ -184,6 +189,7 @@ export function ItemsPage() {
     priority: applied.priority || undefined,
     assigneeId: assigneeFilter,
     search: applied.search || undefined,
+    preset: applied.preset || undefined,
     page: applied.page,
     pageSize: applied.pageSize,
     sort: applied.sort,
@@ -225,6 +231,38 @@ export function ItemsPage() {
 
       <form className="filters" onSubmit={(event) => event.preventDefault()} aria-label="Work item filters">
         <h2 className="visually-hidden">Filters</h2>
+
+        {/* Dashboard preset filters */}
+        <div className="filters__presets">
+          <span className="filters__preset-label">Quick filters:</span>
+          <button
+            type="button"
+            className={`button button--preset ${applied.preset === "assigned" ? "button--preset-active" : ""}`}
+            onClick={() => updateFilter("preset", applied.preset === "assigned" ? "" : "assigned")}
+            aria-pressed={applied.preset === "assigned"}
+            disabled={memberships.length === 0}
+          >
+            Assigned to me
+          </button>
+          <button
+            type="button"
+            className={`button button--preset ${applied.preset === "unassigned_urgent" ? "button--preset-active" : ""}`}
+            onClick={() => updateFilter("preset", applied.preset === "unassigned_urgent" ? "" : "unassigned_urgent")}
+            aria-pressed={applied.preset === "unassigned_urgent"}
+          >
+            Unassigned urgent
+          </button>
+          <button
+            type="button"
+            className={`button button--preset ${applied.preset === "awaiting_approval" ? "button--preset-active" : ""}`}
+            onClick={() => updateFilter("preset", applied.preset === "awaiting_approval" ? "" : "awaiting_approval")}
+            aria-pressed={applied.preset === "awaiting_approval"}
+            disabled={!memberships.some((m) => m.role === "LEAD" || m.role === "ADMIN")}
+          >
+            Awaiting my approval
+          </button>
+        </div>
+
         <div className="filters__grid">
           <FormField id="filter-team" label="Team">
             {(props) => (
