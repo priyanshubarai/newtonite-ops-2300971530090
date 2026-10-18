@@ -20,6 +20,17 @@ const envSchema = z.object({
   // Auth token lifetime in seconds (default 15 minutes). Kept short because
   // memberships/roles are loaded from the database on every request.
   JWT_EXPIRES_IN: z.coerce.number().int().positive().default(900),
+  // Outbox worker tuning (Phase 8). All optional - the worker always runs with
+  // sensible defaults, so running it requires no extra configuration. The
+  // worker reads these through `resolveWorkerConfig`; the HTTP API ignores them.
+  OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  OUTBOX_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(10),
+  OUTBOX_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(5000),
+  OUTBOX_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300000),
+  OUTBOX_LEASE_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  // Demo seed password (development only). The seed script defaults to
+  // "newtonite-demo" if unset; this variable is not used by the API or worker.
+  DEMO_PASSWORD: z.string().optional(),
 });
 
 // Never echo the connection string in errors; only report the missing/invalid field.

@@ -366,6 +366,53 @@ The roadmap's Phase 7 also names three preset dashboard views, a comments sectio
 
 ---
 
+## Implementation Notes (Phase 8 — Transactional Outbox Worker)
+
+Phase 8 implemented the consumer side of Decision 5. **No decision above changed, no schema change or migration was made, no producer path was touched, and no endpoint was added.** The worker reuses the Phase 5 `outbox_jobs` table, the Phase 5 job-type/payload contract (`src/items/outbox.ts`, unchanged), the Phase 1 config module, and the Phase 5 `FOR UPDATE SKIP LOCKED`-capable driver. Phase 8 is optional scope; it was started only after the P0 suites were green, and it runs as a separate process so it cannot affect API latency or the demo.
+
+### A separate process, not a background timer in Express
+The worker is `backend/src/worker.ts` (script `npm run worker`), deliberately mirroring `src/index.ts` rather than being started inside it. Starting a poller inside the API process would make API latency and lifecycle depend on background work, would run one poller per API instance, and would make graceful shutdown ambiguous. As a separate entry point it can be scaled, restarted, and deployed independently, and the HTTP server's shutdown path is unchanged.
+
+### Claiming is a short transaction; processing is not
+`SELECT … FOR UPDATE SKIP LOCKED` picks eligible rows and `UPDATE … SET status = 'PROCESSING'` marks them, in one transaction that commits before any handler runs. Holding the lock across processing would mean a slow handler blocks other workers and a crash holds locks until the connection dies. Doing the work outside the transaction trades exactly-once for at-least-once — the right trade here, because the handler is idempotent and the outcome update is guarded on `status = 'PROCESSING'`. This is Decision 5's "idempotent handlers" requirement, made concrete.
+
+### The claim consumes an attempt
+`attempt_count` is incremented at claim time, not at failure time. This matters: a job whose handler *kills the worker* (OOM, hard crash) never reaches a failure path, so counting only recorded failures would let it crash the worker forever. Counting at claim means every trip through the worker — including the ones that never finish — is bounded by `max_attempts`.
+
+### `updated_at` is the lease, because there is no lock column
+The table has no `locked_at`/`locked_by`. Rather than add a migration for a single optional feature, the worker treats the existing `updated_at` (written from the database clock on every state change) as the lease timestamp: a `PROCESSING` row untouched for longer than the lease timeout is abandoned and made eligible again (or `FAILED` if its attempts are exhausted). This is a real, documented trade-off: adding a lock column would be more explicit and would decouple the lease from other updates, but it was not worth a schema change for optional scope. The columns this relies on already existed; nothing was invented.
+
+### Validate-and-acknowledge, because no real consumer was approved
+The brief forbids inventing business effects and forbids real email/webhook delivery unless already approved. There is no approved integration, so the handler performs the internal work a consumer *must* do before acknowledging an event — supported type, payload matches the Phase 5 contract, referenced work item exists, event `teamId` matches the item's team — and records "processed/validated", never "delivered". Reporting a delivery that never happened would be worse than reporting nothing. Because the handler only reads, it is idempotent by construction, which is what makes the at-least-once contract safe. A real effect is added by extending `src/outbox/handler.ts`; the retry/lease/claim machinery is unaffected.
+
+### Permanent vs. transient, and equal jitter
+`PermanentJobError` (unknown type, malformed payload, dangling reference, team mismatch) fails immediately — a malformed event must not be retried forever. Anything else is transient and rescheduled with **equal jitter** backoff (`ceiling = min(base × 2^(n−1), max)`, delay uniform in `[ceiling/2, ceiling]`). Jitter prevents synchronised retries from stampeding; the `[ceiling/2, …]` floor (rather than "full jitter" from zero) guarantees a minimum wait, so a failing job cannot become a tight loop.
+
+### Logging is structural, not conventional
+Two properties are enforced in code rather than by review: `logEvent` restricts fields to primitives and replaces any object/array with `[omitted]`, so a payload cannot be printed even by mistake; and every string (and every persisted `last_error`) passes through `redactSecrets`, which removes connection strings, `password=`/`token=`/`api_key=` style values, `Bearer` tokens, JWTs, and long hex secrets. Error *categories* are stable identifiers, so they are always safe to log and store. This is how "no secrets or payloads in logs" holds without trusting each call site.
+
+### Configuration in one place, with defaults
+All five `OUTBOX_*` settings live in `config/env.ts` alongside the existing config, are optional, and have defaults, so `npm run worker` works with only the `DATABASE_URL`/`JWT_SECRET` the API already needs. They are read only by the worker.
+
+### Testability by injection
+`WorkerConfig` accepts `processJob` and `log`, so the loop can be driven with an injected processor and a capturing logger. That is what makes the shutdown and observability tests possible without touching the network or stdout. `safeLog` swallows logging errors, so a broken log sink can never break job processing.
+
+### Testing used real PostgreSQL and was isolated by construction
+Claiming, concurrency, leases, and enum-typed transitions cannot be proven with mocks, so `src/outbox/outbox.integration.test.ts` runs against real Neon — including a deterministic `FOR UPDATE SKIP LOCKED` proof where a second open transaction holds a row lock and the claim must skip it. To avoid ever claiming another suite's or the demo's jobs, every claiming test uses a **unique per-run sentinel job type** and deletes exactly the rows it created. The real handler is exercised directly against throwaway fixtures.
+
+### Deliberate path deviation (recorded in the roadmap)
+The roadmap suggested `src/workers/outbox-worker.ts` and `src/services/outbox-processor.ts`. The delivered layout is `src/outbox/{events,backoff,logging,repository,handler,worker}.ts` plus `src/worker.ts`, matching the repo's existing domain-folder convention (`auth/`, `items/`, `db/`). The worker/processor split is preserved as `worker.ts` (loop, config, retry policy) and `handler.ts` (the processor). This is a naming/location choice, not a behavioural or scope change.
+
+### Known limitations (documented, not hidden)
+- **At-least-once, not exactly-once** — inherent to processing outside the claim transaction; safe because handlers are idempotent.
+- **No external delivery and no failed-job alerting** — a `FAILED` job is visible only by querying the table or reading the worker log; no metrics or alerting platform exists.
+- **No outbox retention/purge job** — terminal rows are retained.
+- **`updated_at` doubles as the lease timestamp** (see above).
+- **OS-level SIGTERM/SIGINT delivery is not verifiable on Windows** (a programmatic signal terminates the process rather than being delivered); the underlying shutdown mechanism is covered by tests.
+- **Idle polls log nothing** (only start/stop and work-producing iterations emit records), so liveness is monitored via the table or the start record rather than a heartbeat.
+
+---
+
 ## Summary
 
 All five decisions are **final** for the initial implementation:

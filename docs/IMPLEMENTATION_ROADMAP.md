@@ -228,7 +228,7 @@ npm run test -- --run work-items
 - [x] Ensure business mutation + activity event commit in same PostgreSQL transaction
 - [x] Implement activity event recording for status/assignee/priority changes
 
-> **Status:** implemented and verified (29 mutation integration tests against Neon). Outbox insertion is included; the outbox worker is deferred.
+> **Status:** implemented and verified (29 mutation integration tests against Neon). Outbox insertion is included; the outbox worker was added later in Phase 8.
 
 ### Dependencies
 - Phase 4 complete
@@ -388,14 +388,14 @@ Commit checkpoint not yet taken — Phase 7 is complete and awaiting review.
 **Goal:** Implement the transactional outbox worker with bounded retries and idempotent processing, only if the core product, tests, and demo are stable.
 
 ### Tasks
-- [ ] Implement transactional outbox pattern (already schema in place)
-- [ ] Create outbox worker to poll and process pending jobs
-- [ ] Implement bounded retries with backoff
-- [ ] Ensure all handlers are idempotent
-- [ ] Track retry count, max retries, next retry time
-- [ ] Handle job completion, failure, and max retry exhaustion
-- [ ] Ensure worker doesn't block core API or jeopardize P0 completion
-- [ ] Add basic worker tests if feasible
+- [x] Implement transactional outbox pattern (schema was already in place from Phase 2/5)
+- [x] Create outbox worker to poll and process pending jobs
+- [x] Implement bounded retries with backoff
+- [x] Ensure all handlers are idempotent
+- [x] Track retry count, max retries, next retry time
+- [x] Handle job completion, failure, and max retry exhaustion
+- [x] Ensure worker doesn't block core API or jeopardize P0 completion
+- [x] Add basic worker tests if feasible
 
 ### Dependencies
 - Phases 1-7 stable (core product complete)
@@ -406,23 +406,32 @@ Commit checkpoint not yet taken — Phase 7 is complete and awaiting review.
 - `backend/src/services/outbox-processor.ts`
 - Worker configuration and tests (if time permits)
 
+> **Actual files (recorded deviation — no conflict, no scope change).** The worker was placed in the existing **domain-folder** convention rather than the two suggested paths: `backend/src/outbox/{events,backoff,logging,repository,handler,worker}.ts`, with the process entry point at `backend/src/worker.ts` (mirroring `backend/src/index.ts`). The suggested path was a suggestion, not a contract; the delivered layout keeps the outbox (consumer, producer, retry policy, logging, data access) together and matches how `auth/`, `items/`, and `db/` are already organised. The split into a "worker" and a "processor service" is realised as `worker.ts` (loop + config + retry policy) and `handler.ts` (the job processor), which is the same separation under different file names.
+
 ### Duration
-**Estimated:** 2-4 hours (if implemented)
+**Estimated:** 2-4 hours (if implemented) — **Actual:** one working session; the P0 suite was already green.
 
 ### Acceptance Criteria
-- Outbox worker processes pending jobs from transactional outbox table
-- Retries are bounded (max_retries respected)
-- Handlers are idempotent
-- Worker runs independently without affecting API performance
-- Implementation does not compromise P0 requirements or submission
+- [x] Outbox worker processes pending jobs from transactional outbox table
+- [x] Retries are bounded (max_attempts respected)
+- [x] Handlers are idempotent
+- [x] Worker runs independently without affecting API performance
+- [x] Implementation does not compromise P0 requirements or submission
 
 ### Verification Commands
 ```bash
-npm run test -- --run worker
+cd backend
+npm run test:run                                  # full suite (all phases)
+npx vitest run src/outbox                         # outbox unit + integration suites
+npm run typecheck                                 # tsc --noEmit
+npm run worker                                    # smoke-test the process (Ctrl+C to stop)
 ```
+> The roadmap's suggested `npm run test -- --run worker` does not match this repo's scripts: `npm test` is Vitest **watch** mode and no test file is named `worker`. The commands above are the real equivalents.
 
 ### Fallback Scope
 **P1 but conditional:** Implement only if core product, tests, and demo are stable. If timeline pressure exists, **skip or minimize** - do not endanger P0 completion. This is explicitly lower priority than core product and correctness tests.
+
+> **Condition met.** Phase 8 was undertaken only after the P0 suites were green (backend `npm run test:run` → 131 tests passed before the worker was added; 199 after). The worker is a separate process, so it cannot affect API performance or the demo.
 
 ### Commit Checkpoint
 - Commit: "feat(worker): phase 8 - transactional outbox worker with bounded retries"
@@ -506,6 +515,8 @@ npm run test -- --run
 | 7 | Frontend | P0 | 6-8 |
 | 8 | Outbox Worker | P1 (Conditional) | 2-4 |
 | 9 | Submission Hardening | P0 | 1-3 |
+
+> **Phases 1-7 are complete and committed. Phase 8 (outbox worker) was implemented because its condition was met — P0 suites green and the demo stable — and it is committed only if the author chooses to include it; the P0 submission does not depend on it. Phase 9 (submission hardening) remains.**
 
 **Total Estimated:** 35-53 hours (excluding optional P2 work)
 

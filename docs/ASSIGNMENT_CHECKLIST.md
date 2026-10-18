@@ -86,6 +86,7 @@
 | CH-002 | Record: status changes, assignee changes, priority changes (minimum) | P0 | Writes `STATUS_CHANGED`, `ASSIGNEE_CHANGED`, `PRIORITY_CHANGED` (+ `ITEM_CREATED`, `ITEM_UPDATED`) | activity.ts + mutations.integration.test.ts | Verified (implemented + tested) |
 | CH-003 | Each event includes actor, work item, event type, timestamp, before/after | P0 | Writer sets actor_id, work_item_id, event_type, metadata(before/after); created_at by DB | activity.ts + mutations.integration.test.ts | Verified (implemented + tested) |
 | CH-004 | Business mutation and activity event in same PostgreSQL transaction | P0 | Mutation + version + event + outbox written on one `TxClient`; rollback test proves atomicity | mutations.integration.test.ts (case 26) | Verified (implemented + tested) |
+| CH-005 | Transactional outbox consumed with bounded retries and idempotent handlers | P1 | Separate worker claims via `FOR UPDATE SKIP LOCKED`, backoff + max attempts, permanent/transient split, lease recovery; at-least-once with idempotent handler | `src/outbox/*` unit + integration suites | Verified (implemented + tested) |
 
 ## 9. Role & Permission Matrix
 
@@ -104,7 +105,7 @@
 | ED-002 | Decision 2: PostgreSQL + Drizzle ORM + Drizzle Kit | P0 | Documented with rationale | Review document | Not Started |
 | ED-003 | Decision 3: Atomic claim + optimistic concurrency (versioning) | P0 | Documented with 409 Conflict behavior; implemented in Phase 5 | Review document + code | Verified (documented + implemented) |
 | ED-004 | Decision 4: Team-scoped auth + workflow enforcement (server-side) | P0 | Documented | Review document | Not Started |
-| ED-005 | Decision 5: Idempotency + transactional outbox + audit in same transaction | P0 | Documented with all aspects; implemented in Phase 5 (no outbox worker) | Review document + code | Verified (documented + implemented) |
+| ED-005 | Decision 5: Idempotency + transactional outbox + audit in same transaction | P0 | Documented with all aspects; implemented in Phase 5 (insertion) and Phase 8 (worker consumer) | Review document + code | Verified (documented + implemented) |
 
 ## 11. Critical Behaviors & Tests
 
@@ -118,7 +119,10 @@
 | CT-006 | Audit atomicity: failed activity insert rolls back mutation | P0 | Forced event-insert failure rolls back item + outbox in one transaction | mutations.integration.test.ts (case 26) | Verified (test) |
 | CT-007 | Real PostgreSQL for concurrency integration tests | P0 | Suites run against the configured Neon database; concurrency uses overlapping requests | mutations.integration.test.ts | Verified (implemented) |
 | CT-008 | Vitest + Supertest | P0 | Used by all suites | package.json + *.integration.test.ts | Verified (implemented) |
-| CT-009 | Tests runnable via documented command | P0 | `cd backend && npm run test:run` (131 tests pass, 5 files) | README.md | Verified (documented + run) |
+| CT-009 | Tests runnable via documented command | P0 | `cd backend && npm run test:run` (199 tests pass, 9 files) | README.md | Verified (documented + run) |
+| CT-010 | Outbox claiming is concurrency-safe (no double-claim) | P1 | Concurrent claims return disjoint batches; `FOR UPDATE SKIP LOCKED` proven against a second open transaction | `src/outbox/outbox.integration.test.ts` against Neon | Verified (test, real PostgreSQL) |
+| CT-011 | Outbox retries are bounded; permanent errors never loop | P1 | Transient → backoff reschedule (never early); permanent → immediate `FAILED`; exhausted attempts → `FAILED`; malformed payload safe | `src/outbox/outbox.integration.test.ts` + `src/outbox/backoff.test.ts` | Verified (test) |
+| CT-012 | Worker logs/persisted errors contain no credentials or payloads | P1 | `logEvent` emits primitives only; `redactSecrets` strips connection strings/tokens/keys; `last_error` bounded | `src/outbox/logging.test.ts` + integration suite | Verified (test) |
 
 ## 12. API Inventory
 
@@ -147,7 +151,7 @@
 | RM-005 | Phase 5: Correctness-critical mutations | P0 | Atomic claim, guarded transitions, optimistic concurrency, DB-backed idempotency, transactional activity + outbox | Full suite run against Neon (114 tests, 29 mutation tests); suite now 131 tests total | Verified (complete) |
 | RM-006 | Phase 6: Critical integration tests | P0 | Six critical behaviors covered by real-PostgreSQL tests with genuine concurrency; plus Phase 6 audit (auth matrix, cross-team isolation, pagination, validation, idempotency guards, migration state) with two defects fixed | `mutations.integration.test.ts` + `verification.integration.test.ts` against Neon (131 tests, 5 files) | Verified (complete — executed) |
 | RM-007 | Phase 7: Functional frontend | P0 | Login, shell, filtered/paginated list, detail, create, edit, claim, transitions, conflict + error states implemented; 65 frontend tests across 8 files; typecheck/build exit 0 | `cd frontend && npm test` (65 pass) + `npm run build` | Verified (implemented + tested) — with two items escalated: three dashboard presets, comments/activity (no read endpoints), cursor pagination (ARCHITECTURE.md §15) |
-| RM-008 | Phase 8: Minimal asynchronous worker | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
+| RM-008 | Phase 8: Minimal asynchronous worker | P1 (conditional) | Separate worker process claims `outbox_jobs` with `FOR UPDATE SKIP LOCKED`, validates/acknowledges supported events, bounded exponential backoff with jitter, permanent vs transient errors, max-attempt enforcement, lease recovery of abandoned claims, graceful shutdown, structured sanitised logs, separate entry point + `npm run worker`; 38 unit + 30 real-PostgreSQL tests. No schema change, no migration, no external delivery. | `cd backend && npm run test:run` (199 tests, 9 files) + `npm run worker` smoke test | Verified (implemented + tested) — path deviation (`src/outbox/*` + `src/worker.ts`) recorded in IMPLEMENTATION_ROADMAP.md; at-least-once by design, OS-signal delivery unverified on Windows, no failed-job alerting |
 | RM-009 | Phase 9: Submission hardening | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-010 | Deadline: Mon 19 Oct 2026 10:00 AM, target 9:30 AM | P0 | Deadline documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 

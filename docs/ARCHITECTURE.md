@@ -233,6 +233,22 @@ For secondary asynchronous work, outbox jobs are inserted in the same transactio
 
 **Index:** `oj_status_next_attempt_idx (status, next_attempt_at)` — pending-job lookup ordering.
 
+#### Outbox processing — the Phase 8 worker
+
+The consumer side of the outbox is a **separate process** (`backend/src/worker.ts`, run with `npm run worker`). It is not started by the HTTP server, so the API request path is unaffected by polling. The design was constrained by this table: **no column was added to it** (no migration), so the worker uses the existing columns only.
+
+| Concern | Implementation |
+|---|---|
+| Eligibility | `status = 'PENDING' AND attempt_count < max_attempts AND next_attempt_at <= now()` and a supported `job_type`. |
+| Claiming | `SELECT … FOR UPDATE SKIP LOCKED` followed by `UPDATE … SET status = 'PROCESSING'` in one short transaction; processing happens after commit, so no row lock is held across handler work. Two concurrent workers get disjoint batches. |
+| Attempt accounting | The claim consumes one attempt (`attempt_count + 1`), so a job that repeatedly kills its worker is still bounded by `max_attempts`. |
+| Lease | The schema has no lock/lease column, so `updated_at` (written from `now()` on every state change) acts as the lease timestamp. A job left `PROCESSING` longer than the lease timeout is treated as abandoned: back to `PENDING`, or `FAILED` if its attempts are exhausted. |
+| Retry | Bounded exponential backoff with equal jitter; `next_attempt_at` is pushed into the future and the row stays `PENDING`. |
+| Permanent failure | `status = 'FAILED'`, `processed_at` set, redacted `last_error`; never claimed again. |
+| Delivery | **At-least-once.** Handler work is not inside the claim transaction, so a crash after the work but before the completion update can replay the job; handlers are idempotent and every outcome update is guarded on `status = 'PROCESSING'`. |
+
+**Handler semantics.** There is no approved external integration (no email/webhook), so the handler performs the internal work a consumer must do before acknowledging an event — supported type, payload validated against the Phase 5 contract `{ workItemId, teamId, actorId, status, version }`, referenced work item exists, and event `teamId` matches the item's team — and records **processed/validated**, never "delivered". It is read-only and therefore idempotent by construction. A real consumer is added by extending `backend/src/outbox/handler.ts`.
+
 ## 5. Workflow & State Machine
 
 ### Approved Initial State Machine
@@ -313,6 +329,11 @@ The following behaviors must be correctly implemented and tested:
 | **Workflow enforcement** | Invalid transition or unauthorized approval attempted | `409 INVALID_TRANSITION` for an invalid edge; `403` for an under-privileged approval (`404` for a non-member) |
 | **Resource authorization** | Access attempt from user not in item's team | Denied (403/404 as appropriate for concealment) |
 | **Audit atomicity** | Activity event insert fails in same transaction as mutation | Entire transaction rolls back; work item mutation is not persisted |
+| **Outbox claim concurrency** | Two workers (or one worker twice) claim overlapping batches | Claim rows are selected `FOR UPDATE SKIP LOCKED` in a short transaction; the returned batches are disjoint — no job is handed out twice |
+| **Outbox lease recovery** | A claimed job's worker dies before recording an outcome | After the lease timeout the job becomes eligible again (or `FAILED` if attempts are exhausted), so it is never stuck in `PROCESSING` |
+| **Outbox bounded retry** | A handler fails repeatedly | Transient errors reschedule with bounded exponential backoff; permanent errors and exhausted attempt budgets terminate at `FAILED` — no infinite retry or tight loop |
+| **Outbox at-least-once / idempotency** | The same job is delivered more than once | The job is recorded once per claim; the handler is idempotent, so a replayed delivery produces no duplicate effect |
+| **Outbox log/data safety** | A payload or credential appears in an error path | Logs emit primitives only (objects become `[omitted]`) and `last_error` is redacted and length-bounded; secrets never reach stdout or the database |
 
 **Testing Requirements:**
 - Use **real PostgreSQL** for transaction and concurrency integration tests (mock-only tests insufficient)
@@ -447,6 +468,12 @@ graph LR
 - **Scope:** client behaviour — session/guard transitions, list filtering/pagination, form validation and payload shape, idempotency-key reuse, conflict and permission messaging, and accessibility basics (label association, keyboard submission, non-colour status).
 - **Non-claim:** the frontend suite is not evidence about backend authorization or security; those remain covered by the real-PostgreSQL integration suites above. Tests are never weakened or skipped to make a run pass.
 
+### Outbox worker tests (Phase 8)
+
+- **Unit (no database):** `src/outbox/events.test.ts` (event contract — job types and payload shape pinned to the Phase 5 producer), `src/outbox/backoff.test.ts` (bounds, jitter window, monotonic growth, defensive inputs), `src/outbox/logging.test.ts` (redaction, bounding, error categorisation, primitive-only log records).
+- **Integration (real PostgreSQL):** `src/outbox/outbox.integration.test.ts` covers claiming eligibility (future-scheduled, exhausted, terminal, type-filtered, batch size), **concurrent claim disjointness including a deterministic `FOR UPDATE SKIP LOCKED` proof** (a second open transaction holds a row lock and the claim must skip it), lease recovery, success/transient/permanent outcomes, maximum-attempt enforcement, invalid-payload safety, duplicate delivery, loop shutdown (stop claiming, finish in-flight job), and log/persisted-error sanitisation.
+- **Isolation:** claiming tests use a **unique per-run sentinel job type**, so a run can never claim a job belonging to another suite or the demo data; every job it inserts is deleted in `afterEach`. The real `work_item.*` handler is exercised directly against throwaway fixtures.
+
 ## 13. Transaction Boundaries
 
 - **Business mutation + Activity event:** Must commit in the same PostgreSQL transaction
@@ -454,6 +481,7 @@ graph LR
 - **Atomic claim:** Conditional UPDATE with WHERE clause (item unassigned AND team matches) to ensure exactly one winner
 - **Optimistic concurrency:** UPDATE with version check (version = expected) AND increment version on success
 - **Idempotency:** Serialize same-key requests with a transaction-scoped `pg_advisory_xact_lock` as the first statement, backed by a `(scope, key)` unique index; the record commits with the mutation. Same key + same payload replays the stored response; same key + different payload → `409 IDEMPOTENCY_KEY_REUSED`
+- **Outbox claim:** Select-and-mark-`PROCESSING` (`FOR UPDATE SKIP LOCKED`) is its own short transaction. Handler work, retry scheduling, and the completion/failure update all happen **after** it commits, so no lock is ever held across processing. Each outcome update is additionally guarded on `status = 'PROCESSING'`, so a re-claimed (recovered) job cannot be completed twice.
 
 ## 14. Future Scaling Considerations (Not Initial)
 
@@ -484,3 +512,10 @@ There are no known conflicts between this specification and the empty repository
 **What was delivered instead, without adding endpoints:** a single server-filtered, server-paginated list (team, status, priority, assignee, search, sort), detail with claim and workflow-transition actions, create and edit forms, and explicit conflict handling. No activity or comments UI is rendered, and the detail view states that activity history is unavailable rather than implying it exists.
 
 **Decision needed:** either add the missing query parameters and read endpoints in a future phase, or amend §9/Phase 7 to accept the single filterable list as the delivered dashboard. Phase 7 made no conflicting change to the specification; it implemented the authorised subset and recorded the gap here.
+
+### Phase 8 (outbox worker) — no new conflict; one recorded deviation and one open item
+
+Phase 8 raised **no conflict requiring an architect decision**. Two things are recorded for the reviewer:
+
+1. **Recorded deviation (not a conflict).** The roadmap's Phase 8 *Expected Files* were `backend/src/workers/outbox-worker.ts` and `backend/src/services/outbox-processor.ts`. The worker was instead delivered as `backend/src/outbox/{events,backoff,logging,repository,handler,worker}.ts` with the entry point at `backend/src/worker.ts`, following the repository's existing domain-folder convention. The worker/processor separation is preserved as `worker.ts` (loop, config, retry policy) and `handler.ts` (processor). No behaviour, scope, or contract changed. Recorded in `docs/IMPLEMENTATION_ROADMAP.md` (Phase 8).
+2. **Open item — no downstream consumer is approved.** There is no approved email/webhook/integration, so the worker's handler validates and acknowledges supported `work_item.*` events and records **processed/validated**, never "delivered". It deliberately invents no business effect. If the intended semantics were "deliver a notification", that requires an approved integration and a handler branch; the claiming/retry/lease machinery would not change. **Decision needed (if any):** confirm that validate-and-acknowledge is the intended terminal effect, or specify the approved downstream consumer.

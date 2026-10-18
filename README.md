@@ -95,7 +95,7 @@ All views support server-side search, filtering, deterministic ordering, and cur
 
 ## Current Implementation Status
 
-**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), the core work-item API — list, create, detail, update (Phase 4) — and the critical-mutation layer — atomic claim, workflow transitions, optimistic concurrency, idempotency, and transactional activity + outbox (Phase 5) — are implemented and verified. Phase 6 (integration, security, and regression verification) audited Phases 1–5 against the running database and API, fixed two API error-handling defects, and added a focused verification suite that passes against real PostgreSQL. Phase 7 built the React operations dashboard on top of that API: login and session handling, the authenticated shell, a server-filtered and server-paginated work-item list, detail, create and edit forms, and the claim and workflow-transition actions with explicit conflict handling. Not yet built: the outbox worker (Phase 8) and submission hardening (Phase 9).
+**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), the core work-item API — list, create, detail, update (Phase 4) — and the critical-mutation layer — atomic claim, workflow transitions, optimistic concurrency, idempotency, and transactional activity + outbox (Phase 5) — are implemented and verified. Phase 6 (integration, security, and regression verification) audited Phases 1–5 against the running database and API, fixed two API error-handling defects, and added a focused verification suite that passes against real PostgreSQL. Phase 7 built the React operations dashboard on top of that API: login and session handling, the authenticated shell, a server-filtered and server-paginated work-item list, detail, create and edit forms, and the claim and workflow-transition actions with explicit conflict handling. Phase 8 added the transactional-outbox **worker**: a separate process that claims pending jobs with `FOR UPDATE SKIP LOCKED`, validates and acknowledges them, retries transient failures with bounded exponential backoff, dead-letters permanent failures, recovers abandoned claims, and shuts down gracefully. Not yet built: submission hardening (Phase 9).
 
 See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status of all requirements.
 
@@ -195,18 +195,17 @@ Set in `backend/.env` (gitignored). See `backend/.env.example` for blank placeho
 | `DATABASE_URL` | Yes | Neon PostgreSQL connection string. |
 | `JWT_SECRET` | Yes | Signing secret for auth tokens (min 32 chars). Never commit a real value. |
 | `JWT_EXPIRES_IN` | No | Token lifetime in seconds (default `900`). |
+| `DEMO_PASSWORD` | No | Password for all seeded demo users; defaults to `newtonite-demo`. Development only. |
+| `OUTBOX_BATCH_SIZE` | No | Outbox worker batch size (default `10`). |
+| `OUTBOX_POLL_INTERVAL_MS` | No | Outbox worker poll interval (ms, default `2000`). |
+| `OUTBOX_BACKOFF_BASE_MS` | No | Outbox retry backoff base (ms, default `5000`). |
+| `OUTBOX_BACKOFF_MAX_MS` | No | Outbox retry backoff ceiling (ms, default `300000`). |
+| `OUTBOX_LEASE_TIMEOUT_MS` | No | Outbox lease timeout (ms, default `60000`). |
+| `VITE_API_URL` | No (frontend) | Same-origin `/api` recommended; set to full URL only when cross-origin. |
 
 ### Demo login (development-only)
 
-The seed creates 10 users that all share one password. In `backend/.env`, set `DEMO_PASSWORD` (defaults to `newtonite-demo`) before running `npm run seed`. Then:
-
-```bash
-curl -X POST http://localhost:3000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"avery@newtonite.dev","password":"newtonite-demo"}'
-```
-
-*These credentials are for local development only — do not reuse them anywhere real.*
+**Demo login (development-only):** any seeded email shares the same password. Set `DEMO_PASSWORD` in `backend/.env` before running `npm run seed` (the seed defaults to `newtonite-demo` if the variable is not set). Example: `avery@newtonite.dev` / `newtonite-demo`. These are development-only credentials and must never be used in production.
 
 ### Team-scoped role model
 
@@ -232,9 +231,13 @@ Authorization is enforced entirely server-side (`src/auth/policy.ts` + `src/auth
 ```bash
 # Start backend (dev)
 cd backend && npm run dev
+# Start the outbox worker (separate process; safe to run alongside the API)
+cd backend && npm run worker
 # Start frontend (dev)
-cd frontend && npm run dev
+cd frontend && npm run dev  # http://localhost:5173 (proxies /api to backend)
 ```
+
+> The worker is a **separate process** from the API — the API never starts one, so API latency is unaffected by polling. See [Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8).
 
 ### Testing
 
@@ -261,7 +264,7 @@ cd ../backend && npm run db:generate
 cd ../backend && npm run db:migrate
 ```
 
-> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts`, `src/items/items.integration.test.ts`, `src/items/mutations.integration.test.ts`, and `src/verification.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset. The mutation suite also exercises genuine concurrency (overlapping requests) and reads the committed rows/activity/outbox back to prove the guarantees hold. The Phase 6 verification suite covers API error handling (malformed/oversized bodies), the full unauthenticated-token matrix on the items API, live membership/role changes, cross-team isolation, the pagination contract, input validation, idempotency guards, and live migration state.
+> **Note on test layers:** `src/auth/policy.test.ts`, `src/outbox/events.test.ts`, `src/outbox/backoff.test.ts`, and `src/outbox/logging.test.ts` are pure unit tests (no database). `src/auth/auth.integration.test.ts`, `src/items/items.integration.test.ts`, `src/items/mutations.integration.test.ts`, `src/verification.integration.test.ts`, and `src/outbox/outbox.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset. The mutation suite also exercises genuine concurrency (overlapping requests) and reads the committed rows/activity/outbox back to prove the guarantees hold. The Phase 6 verification suite covers API error handling (malformed/oversized bodies), the full unauthenticated-token matrix on the items API, live membership/role changes, cross-team isolation, the pagination contract, input validation, idempotency guards, and live migration state. The outbox integration suite proves **real-database claim concurrency** (`FOR UPDATE SKIP LOCKED` against a second open transaction, plus overlapping claims), lease recovery, backoff/max-attempt enforcement, duplicate delivery, shutdown, and log/persisted-error sanitisation; it claims only jobs it created, identified by a unique per-run job type.
 >
 > **Frontend tests** (`frontend/src/**/*.test.ts(x)`) run in jsdom and drive the real route table and the real API client against a stubbed network boundary, so URL building, auth headers, error parsing, conflict handling, and route guards are exercised rather than mocked away. They prove client behaviour only — they make no claim about backend authorization or security, which is covered by the backend integration suites above.
 
@@ -390,7 +393,7 @@ The four mutation endpoints (`POST /items`, `PATCH /items/:id`, `POST /items/:id
 - Every successful mutation writes at least one **activity event** in the same transaction: `ITEM_CREATED` (create), `PRIORITY_CHANGED`/`ASSIGNEE_CHANGED`/`ITEM_UPDATED` (per changed category on update), `ASSIGNEE_CHANGED` (claim), `STATUS_CHANGED` (transition). `metadata` carries the before/after values.
 - Every successful mutation also enqueues exactly one **outbox job** (`job_type` = `work_item.created`/`updated`/`claimed`/`transitioned`; payload `{ workItemId, teamId, actorId, status, version }`), inserted in the same transaction as the mutation.
 - Failed, stale, unauthorized, and losing requests produce **no** activity event and **no** outbox job.
-- There is **no outbox worker** in this phase: jobs are durably enqueued only; delivery is future work.
+- There is **no external delivery** from the request path: mutations only *enqueue* a job. Processing is done by the separate outbox worker process (`npm run worker`, Phase 8) — see [Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8).
 
 ### Error semantics
 
@@ -414,7 +417,7 @@ Conflict responses include a machine-readable `code` alongside the human-readabl
 ### Phase 5 scope notes and known limitations
 
 - **Transactional guarantee.** Item mutation, version increment, activity event, outbox job, and idempotency record are committed on one connection in one transaction. There is no partial commit.
-- **No outbox worker / notification delivery.** Jobs are enqueued only. This is a deliberate deferral, not a correctness gap in the mutation path.
+- **No external delivery.** Jobs are enqueued transactionally; a *separate* worker process (Phase 8) validates and acknowledges them. No email/webhook/integration is implemented, so nothing claims a notification was delivered — see [Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8).
 - **No idempotency purge job.** `expires_at` is a retention hint; cleanup is future work.
 - **Claimability** is defined as `OPEN` or `IN_PROGRESS` over the existing status model (no new statuses); `AWAITING_APPROVAL`/`RESOLVED`/`CLOSED` are not claimable.
 - **`ITEM_UPDATED` enum value** was added by additive migration `0001_yummy_the_captain.sql` (`ALTER TYPE ... ADD VALUE`) so a title/description/type/dueAt change has an accurate event type. No historical audit rows were rewritten.
@@ -430,6 +433,101 @@ Phase 6 audited Phases 1–5 against the running application and the live Neon d
   2. An **out-of-range `page` returned `500`**. `page` had no upper bound, so a huge value produced an `OFFSET` such as `2e+21` that PostgreSQL rejects (`22P02 invalid input syntax for type bigint`). Fixed in `src/items/validation.ts` by capping `page` at `Number.MAX_SAFE_INTEGER` (which keeps `page × pageSize` within a bigint), rejecting absurd values with `400` rather than failing at the database.
 - **Verification (all executed against real PostgreSQL, all passing):** authentication boundaries (missing/malformed/expired/forged tokens → `401`); login non-disclosure; response hygiene (no SQL, stack traces, or secrets in error bodies); live membership revocation and role promotion/demotion honoured on the next request; cross-team isolation across every mutation endpoint (`404`); the pagination contract incl. the preserved `pageSize > 100 → 400` rule; `PATCH`/create input validation; idempotency guards (over-long key rejected, validation failures not cached and key not consumed); and the live migration state (the `ITEM_UPDATED` enum value is applied and the two migrations are recorded).
 - **Known limitation confirmed, not fixed here:** there is **no comments endpoint**, so the checklist's "cannot comment on another team's item" case has no matching route to exercise; item-level cross-team isolation is instead verified against every existing mutation endpoint. See the Phase 6 report.
+
+## Transactional Outbox Worker (implemented — Phase 8)
+
+Phase 8 adds the **consumer** side of the Phase 5 transactional outbox. A mutation still enqueues its job in the same transaction as the business change (that guarantee is untouched); a separate worker process then claims and processes those jobs.
+
+### Running it
+
+```bash
+cd backend
+npm run worker        # tsx src/worker.ts
+```
+
+It is a **separate process from the API** (`src/index.ts`). The API never spawns a worker and the worker never imports the Express app, so there is exactly one worker per process that runs it and API latency is unaffected by polling. `Ctrl+C` (SIGINT) or SIGTERM stops it gracefully.
+
+### Required configuration
+
+`DATABASE_URL` is required (same as the API) and comes from `backend/.env`. `JWT_SECRET` is also required by the shared config module even though the worker does not use it. **Every outbox setting is optional and has a default**, so the command above works with no extra configuration:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OUTBOX_BATCH_SIZE` | `10` | Maximum jobs claimed per poll. |
+| `OUTBOX_POLL_INTERVAL_MS` | `2000` | Delay between polls. |
+| `OUTBOX_BACKOFF_BASE_MS` | `5000` | First retry delay; doubles per attempt, with jitter. |
+| `OUTBOX_BACKOFF_MAX_MS` | `300000` | Retry delay ceiling. |
+| `OUTBOX_LEASE_TIMEOUT_MS` | `60000` | How long a job may stay `PROCESSING` before its claim is treated as abandoned. |
+
+### How polling and claiming work
+
+Each iteration does three things, in order:
+
+1. **Recover abandoned claims.** A job left `PROCESSING` longer than `OUTBOX_LEASE_TIMEOUT_MS` is treated as abandoned (its worker crashed or lost its connection) and made eligible again. The schema has no dedicated lock columns, so the worker uses the existing `updated_at` column as the **lease timestamp** — written from the database clock (`now()`) at every state change. An abandoned job whose attempts are already exhausted goes straight to `FAILED` instead of looping.
+2. **Claim a bounded batch.** `UPDATE`-to-`PROCESSING` over candidates selected with `SELECT … FOR UPDATE SKIP LOCKED` inside a short transaction. Eligibility is `status = 'PENDING'` **and** `attempt_count < max_attempts` **and** `next_attempt_at <= now()` **and** a supported `job_type`. A second worker running concurrently skips locked rows, so two claims return **disjoint** sets — proven against real PostgreSQL, not mocks.
+3. **Process and record.** Each claimed job is handled *outside* the claim transaction, so no database lock is ever held across handler work.
+
+The claim transaction contains only the two statements above. Claiming consumes one attempt, so a job that repeatedly crashes its worker is still bounded by `max_attempts`.
+
+**Only the four `work_item.*` types are claimed.** An unknown `job_type` is never claimed (it stays `PENDING` and is visible by querying the table) rather than being failed, so a future producer's event type is not prematurely dead-lettered.
+
+### What the handler actually does (and does not do)
+
+There is **no approved downstream integration** — no email, no webhook, no external service — and inventing one would mean claiming a delivery that never happened. So the handler performs the real, verifiable internal work a consumer of these events must do before acknowledging them:
+
+1. confirm the event type is supported;
+2. validate the payload against the Phase 5 contract `{ workItemId, teamId, actorId, status, version }`;
+3. load the referenced work item and confirm it exists;
+4. confirm the event's `teamId` matches the work item's team (a structural invariant — the producer builds the payload from the row it just wrote).
+
+The outcome recorded is **"processed/validated"**, never "delivered". The handler is idempotent by construction (steps 1–4 are reads and validations), so replaying a delivery has no effect. Extending the worker to a real consumer means adding a branch to `src/outbox/handler.ts`; the claiming, retry, and lease machinery does not change.
+
+`status` and `version` in the payload are the *event-time snapshot*: they are validated structurally but deliberately **not** compared with the current row, because the work item legitimately advances after the event is enqueued.
+
+### Retry, backoff, and failure policy
+
+| Failure | Behaviour |
+|---|---|
+| **Transient** (e.g. the database was briefly unavailable) | Back to `PENDING` with `next_attempt_at = now() + backoff`. Backoff is bounded exponential ("equal jitter": `min(base × 2^(n−1), max)`, jittered down to no less than half), so it never degenerates into a tight loop. |
+| **Permanent** (unknown type, malformed payload, missing work item, team mismatch) | `FAILED` immediately, regardless of remaining attempts — a malformed event can never be retried forever. |
+| **Attempts exhausted** | `FAILED` on the attempt that reaches `max_attempts` (per-row, default 10). |
+
+### How failed jobs are represented
+
+A terminal job is `status = 'FAILED'` with `processed_at` set and a **redacted, length-bounded** `last_error` (category + message, e.g. `INVALID_PAYLOAD: payload failed validation (workItemId: Invalid uuid)`) and its final `attempt_count`. It is never claimed again. Developer inspection:
+
+```sql
+SELECT job_type, status, attempt_count, max_attempts, processed_at, last_error
+FROM outbox_jobs
+WHERE status IN ('FAILED', 'PROCESSING')
+ORDER BY updated_at DESC;
+```
+
+### Logs and observability
+
+The worker writes one JSON object per line on stdout — `worker.started`, `worker.batch` (per-iteration `claimed`/`processed`/`retried`/`failed` counters), `worker.job_completed`, `worker.job_retry_scheduled`, `worker.job_failed`, `worker.leases_recovered`, `worker.job_state_lost`, `worker.iteration_failed`, and `worker.stopped`. Error messages are redacted (connection strings, passwords, bearer tokens, JWTs and long hex secrets) and log fields are restricted to primitives, so a payload object cannot be printed even by mistake. Idle polls emit no batch line by design.
+
+### Delivery guarantee
+
+Delivery is **at-least-once, not exactly-once**. A worker can complete the handler work and crash before marking the job `COMPLETED`; lease recovery then hands the same job to another attempt. This is inherent to doing work outside a transaction (a single transaction would hold locks across processing) and it is safe because the handler is idempotent and every state transition is guarded on `status = 'PROCESSING'`, so two workers cannot both record an outcome for the same claim.
+
+### Testing the worker
+
+```bash
+cd backend
+npm run test:run                                   # everything
+npx vitest run src/outbox                          # just the outbox suites
+```
+
+`src/outbox/events.test.ts`, `src/outbox/backoff.test.ts`, and `src/outbox/logging.test.ts` are pure unit tests (no database). `src/outbox/outbox.integration.test.ts` runs against real PostgreSQL for claiming, concurrency, leases, retries, attempt limits, duplicate delivery, shutdown, and log sanitisation. See [Testing](#testing).
+
+### Phase 8 known limitations
+
+- **No external delivery and no failed-job alerting.** A `FAILED` job is visible only by querying the table or reading the worker log; no alerting or metrics platform is implemented (and none was in scope).
+- **No outbox purge.** Completed/failed rows are retained; no retention job exists.
+- **Abandoned-claim recovery uses `updated_at` as the lease timestamp**, because the schema has no dedicated lock column. Adding one would give a more explicit lease but requires a migration, which was deliberately avoided.
+- **Graceful signal handling is wired but not OS-verified on Windows**, where a programmatic `SIGTERM` terminates the process instead of being delivered. The shutdown *mechanism* (stop claiming, finish the in-flight job, close the pool) is covered by the integration suite.
+- **One worker per process.** There is no leader election or scheduler; running the same command twice is safe (claims are disjoint) but both processes poll independently.
 
 ## Frontend (implemented — Phase 7)
 
@@ -529,7 +627,7 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 - Reopening Closed items is out of scope
 - No Redis, dedicated search engine, read replicas, or partitioning in initial build
 - WebSockets, SSO, email delivery, file attachments are not part of initial implementation
-- Transactional outbox **insertion** is implemented (jobs are written in the same transaction as the mutation); the outbox **worker** that would deliver/process jobs is not implemented in Phase 5.
+- Transactional outbox **insertion** (Phase 5) and a **worker** (Phase 8) are implemented: jobs are written in the same transaction as the mutation, and a separate process claims, validates, and acknowledges them with bounded retries. There is still **no external delivery** (no email/webhook/integration), and **no failed-job alerting** — a `FAILED` job is visible only by querying the table or grepping the worker log (see *[Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8)*).
 - Idempotency records have no automated purge yet (`expires_at` is a retention hint).
 - No activity-history or comments **read** endpoint exists, so the frontend has no activity timeline or comments section (confirmed in Phase 6, restated in Phase 7).
 - The frontend keeps the auth token in memory only, so a page refresh signs the user out (see *Frontend (implemented — Phase 7)*).
