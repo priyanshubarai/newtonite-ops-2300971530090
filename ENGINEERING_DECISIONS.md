@@ -227,6 +227,38 @@ The seed already used `bcryptjs` to hash demo passwords, so login verification r
 
 ---
 
+## Implementation Notes (Phase 4 — Work-Item API)
+
+Implementation-level details for the read/create/update work-item endpoints. They do **not** change any of the five approved architectural decisions above, and they deliberately stop short of the Phase 5 correctness work.
+
+### Layering: routes → service → repository
+The auth module put most logic in the route file; work items have more orchestration (membership resolution, authorization against a resource's real team, assignee rules), so they are split into `items/{validation,repository,service,routes,serialize}.ts`. Routes stay thin (parse + translate), the service owns authorization and business rules, and the repository owns all SQL. This keeps the Phase 5 additions (audit writes, version guard) localized.
+
+### Shared `ApiError` + central error handler
+Services throw a small `ApiError(status, message, details?)` and a thin `asyncHandler` forwards rejections to the existing central Express error handler, which maps an `ApiError` to its status with the established `{ error }` body (plus optional field-level `details`) and everything else to a generic `500`. No new error shape was introduced — it matches the Phase 3 auth convention.
+
+### Team scoping and 404-not-403
+Listing is always constrained to the caller's membership team ids. Detail and update load the resource first and authorize against its **real** `team_id` from the database. As in Phase 3, a non-member is concealed as `404` and an under-privileged member gets `403`. A `teamId` list filter naming a non-member team yields an empty page rather than an error, so membership is not disclosed.
+
+### Malformed ids fail closed as 404
+A malformed `:id` on detail/update is treated as `404` (consistent with the Phase 3 convention of failing closed on malformed UUIDs) rather than `400`, so it cannot be distinguished from a non-existent item. Malformed UUIDs **in a body or query** remain `400` because they are ordinary input-validation failures and reveal nothing about other tenants.
+
+### Server-owned fields cannot be set by clients
+`POST`/`PATCH` bodies use zod `.strict()` schemas, so supplying `status`, `version`, `createdBy`, `id`, or timestamps is a `400` rather than a silent override. `createdBy`, `status = OPEN`, and `version = 1` are set by the server from the authenticated identity.
+
+### Exact totals and deterministic ordering
+`GET /items` returns an **exact** `COUNT(*)` over the same filters (a second indexed query, not an estimate). Ordering appends `id` ascending as a tie-breaker so pagination is stable. `pageSize` is bounded (1–100) and out-of-range values are rejected rather than clamped, so the cap cannot be bypassed silently.
+
+### Same-team assignment enforced in the service
+The Phase 2 note deferred the "assignee belongs to the same team" invariant out of the database. Phase 4 enforces it in the service: a supplied `assigneeId` is checked via a membership lookup (`getTeamRole`) and rejected with `400` if the user is not a member of the item's team. Any team role (including Viewer) may be assigned work; cross-team and non-member assignment are always refused.
+
+### Deliberately deferred to Phase 5 (documented gaps)
+- **No activity/audit events** are written on create/update yet; the service is structured so Phase 5 can wrap the mutation and its activity insert in one interactive transaction.
+- **No optimistic concurrency**: `version` is returned but neither checked nor incremented, so `PATCH` is last-write-wins. `repository.updateWorkItem` is the single place to add `WHERE id = ? AND version = ?` + `409`.
+- Claim, status transitions, comments, activity history, and idempotency remain out of scope.
+
+---
+
 ## Summary
 
 All five decisions are **final** for the initial implementation:

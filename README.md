@@ -95,7 +95,7 @@ All views support server-side search, filtering, deterministic ordering, and cur
 
 ## Current Implementation Status
 
-**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), and authentication + team-scoped authorization (Phase 3) are implemented and verified. The frontend is scaffolded but product screens are not yet built.
+**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), and the core work-item API — list, create, detail, update (Phase 4) — are implemented and verified. The frontend is scaffolded but product screens are not yet built.
 
 See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status of all requirements.
 
@@ -253,7 +253,93 @@ cd ../backend && npm run db:generate
 cd ../backend && npm run db:migrate
 ```
 
-> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts` runs against the configured Neon database and creates/cleans up its own throwaway fixtures — it never mutates the seeded demo dataset.
+> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts` and `src/items/items.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset.
+
+## Work-Item API (implemented — Phase 4)
+
+Phase 4 adds the first work-item endpoints: listing, creation, detail, and partial update. All require authentication (see Phase 3) and every query is scoped to the caller's team memberships.
+
+### Endpoints
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /items` | Required | List work items visible to the caller, with filtering, search, sorting, and pagination. |
+| `POST /items` | Required | Create a work item in a team the caller can write to. |
+| `GET /items/:id` | Required | Fetch one work item. |
+| `PATCH /items/:id` | Required | Update permitted fields of one work item. |
+
+### Team scoping
+
+The caller only ever sees items from teams they are a member of. `GET /items` filters by the caller's team ids; `GET /items/:id` and `PATCH /items/:id` load the item first and authorize against the item's **real** team id from the database (never a client-supplied one).
+
+- No membership in the item's team → `404` (conceals existence; prevents cross-team enumeration).
+- A member whose role lacks the action → `403`.
+- `GET /items?teamId=<team the caller is not in>` returns an **empty page** — it does not disclose whether that team has items.
+
+### `GET /items` query contract
+
+| Parameter | Default | Rules |
+|---|---|---|
+| `teamId` | — | UUID. Must be a team the caller belongs to, otherwise an empty page. |
+| `status` | — | One of `OPEN`, `IN_PROGRESS`, `AWAITING_APPROVAL`, `RESOLVED`, `CLOSED`. |
+| `priority` | — | One of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. |
+| `assigneeId` | — | UUID. |
+| `search` | — | Case-insensitive substring match over `title` and `description`; max 200 chars; `%` and `_` are matched literally (no wildcard injection). |
+| `page` | `1` | Integer ≥ 1. |
+| `pageSize` | `20` | Integer 1–100. Values above the cap are **rejected with `400`**, not silently clamped. |
+| `sort` | `updatedAt` | Allowlisted: `createdAt`, `updatedAt`, `priority`, `dueAt`. |
+| `order` | `desc` | `asc` or `desc`. |
+
+Ordering is deterministic: the requested column/direction followed by `id` ascending as a tie-breaker, so equal sort keys never produce unstable pages. `priority` sorts by its enum order (`LOW` → `CRITICAL`).
+
+Response:
+
+```json
+{
+  "items": [ /* work-item objects */ ],
+  "pagination": {
+    "page": 1, "pageSize": 20, "total": 123,
+    "totalPages": 7, "hasNextPage": true, "hasPrevPage": false
+  }
+}
+```
+
+`total` is an **exact** count computed with `COUNT(*)` over the same filters (not an estimate).
+
+### `POST /items` body
+
+```json
+{
+  "title": "…", "description": "…",
+  "type": "INCIDENT", "priority": "HIGH",
+  "teamId": "<uuid>", "assigneeId": "<uuid>|null", "dueAt": "<ISO-8601>|null"
+}
+```
+
+- Only the fields above are accepted. Unknown/protected fields (`status`, `version`, `createdBy`, `id`, timestamps) are **rejected with `400`** rather than silently ignored.
+- `createdBy` is taken from the authenticated user; `status` is set to `OPEN` and `version` to `1` by the server.
+- Requires the `create_item` permission for the target team.
+- If `assigneeId` is supplied it must be a member of the **same team**, otherwise `400` — cross-team assignment is never permitted.
+
+### `PATCH /items/:id` body
+
+A subset of `title`, `description`, `type`, `priority`, `dueAt`, `assigneeId`. The body must contain at least one of these; an empty body or any protected field is rejected with `400`. This endpoint never changes `status`, `version`, `teamId`, or `createdBy`.
+
+### Error semantics
+
+| Status | When |
+|---|---|
+| `400` | Invalid body/query: bad enum values, malformed UUIDs **in the body**, unknown or protected fields, empty PATCH, out-of-range pagination, cross-team assignee. |
+| `401` | Missing or invalid bearer token. |
+| `403` | Authenticated member whose role lacks the action (e.g. a Viewer creating or editing). |
+| `404` | Item missing, item belongs to a non-member team, or the `:id` is malformed (fail-closed). |
+
+### Phase 4 scope notes
+
+- **No activity/audit events are written yet.** Recording `ITEM_CREATED` and field-change events atomically with the mutation is Phase 5. The route → service → repository layering already isolates where the transactional write will go.
+- **No optimistic concurrency yet.** `version` is read and returned but never incremented or checked — `PATCH` is last-write-wins in Phase 4. `repository.updateWorkItem` is the single extension point for Phase 5's conditional `WHERE id = ? AND version = ?` returning `409`.
+- The claim endpoint, status-transition endpoint, comments, activity history, and idempotency handling are **out of Phase 4 scope**.
+- The existing `work_items` indexes (`wi_team_status_updated_idx`, `wi_team_priority_status_updated_idx`, `wi_assignee_status_updated_idx`, plus the single-column indexes) already cover the team-scoped filter/sort access patterns; **no new index was required**.
 
 ## Critical Testing Requirements
 

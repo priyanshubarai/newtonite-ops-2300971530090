@@ -119,15 +119,15 @@
 |---|---|---|---|---|---|
 | API-001 | POST /auth/login | P0 | Implemented; generic 401 on all failures, tested | auth.integration.test.ts against Neon | Verified (endpoint + tests) |
 | API-002 | GET /me | P0 | Documented | ARCHITECTURE.md | Not Started |
-| API-003 | GET /items | P0 | Documented with filtering/search/cursor pagination | ARCHITECTURE.md | Not Started |
-| API-004 | POST /items | P0 | Documented | ARCHITECTURE.md | Not Started |
-| API-005 | GET /items/:id | P0 | Documented | ARCHITECTURE.md | Not Started |
-| API-006 | PATCH /items/:id | P0 | Documented | ARCHITECTURE.md | Not Started |
+| API-003 | GET /items | P0 | Implemented with filtering/search/sorting/offset pagination; team-scoped, exact totals | items.integration.test.ts against Neon | Verified (endpoint + tests) |
+| API-004 | POST /items | P0 | Implemented; server-owned fields, strict body, same-team assignee | items.integration.test.ts against Neon | Verified (endpoint + tests) |
+| API-005 | GET /items/:id | P0 | Implemented; 404 for non-member team / malformed id | items.integration.test.ts against Neon | Verified (endpoint + tests) |
+| API-006 | PATCH /items/:id | P0 | Implemented; allowlisted editable fields, protected fields rejected | items.integration.test.ts against Neon | Verified (endpoint + tests) |
 | API-007 | POST /items/:id/claim | P0 | Documented | ARCHITECTURE.md | Not Started |
 | API-008 | POST /items/:id/transition | P0 | Documented | ARCHITECTURE.md | Not Started |
 | API-009 | POST /items/:id/comments | P0 | Documented | ARCHITECTURE.md | Not Started |
 | API-010 | GET /items/:id/activity | P0 | Documented | ARCHITECTURE.md | Not Started |
-| API-011 | Consistent HTTP errors: 401, 403, 404, 409 + validation | P0 | Error strategy documented | ARCHITECTURE.md | Not Started |
+| API-011 | Consistent HTTP errors: 401, 403, 404, 409 + validation | P0 | 400/401/403/404 implemented and tested; 409 reserved for Phase 5 concurrency | items.integration.test.ts + auth.integration.test.ts | Partial (409 → Phase 5) |
 
 ## 13. Implementation Roadmap (9 Phases)
 
@@ -136,7 +136,7 @@
 | RM-001 | Phase 1: Project foundation | P0 | Documented with all required elements | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-002 | Phase 2: Database schema and seed data | P0 | All 8 entities, migrations, seed verified against Neon | Migration + seed executed & verified | Verified (complete) |
 | RM-003 | Phase 3: Authentication and authorization | P0 | Login, /me, middleware, policy helpers, tests all implemented | Full suite run against Neon (53 tests pass) | Verified (complete) |
-| RM-004 | Phase 4: Work-item API | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
+| RM-004 | Phase 4: Work-item API | P0 | GET/POST /items, GET/PATCH /items/:id implemented with validation, service, repo, tests | Full suite run against Neon (30 items tests) | Verified (complete) |
 | RM-005 | Phase 5: Correctness-critical mutations | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-006 | Phase 6: Critical integration tests | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-007 | Phase 7: Functional frontend | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |

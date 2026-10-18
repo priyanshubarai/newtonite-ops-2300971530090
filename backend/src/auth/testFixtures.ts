@@ -1,9 +1,10 @@
 import bcrypt from "bcryptjs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { teams } from "../db/schema/teams.js";
 import { userTeamMemberships } from "../db/schema/memberships.js";
+import { workItems } from "../db/schema/work_items.js";
 import { teamRoleEnum } from "../db/schema/enums.js";
 
 type Role = (typeof teamRoleEnum.enumValues)[number];
@@ -71,12 +72,50 @@ async function clearTeamMemberships(teamId: string): Promise<void> {
   await db.delete(userTeamMemberships).where(eq(userTeamMemberships.teamId, teamId));
 }
 
-/** Remove fixture rows in FK-safe order: memberships, then users, then teams. */
+/** Inserts a throwaway work item and returns its id. */
+export async function createTestWorkItem(opts: {
+  teamId: string;
+  createdBy: string;
+  title?: string;
+  description?: string | null;
+  type?: (typeof workItems.$inferInsert)["type"];
+  priority?: (typeof workItems.$inferInsert)["priority"];
+  status?: (typeof workItems.$inferInsert)["status"];
+  assigneeId?: string | null;
+  dueAt?: Date | null;
+}): Promise<string> {
+  const [row] = await db
+    .insert(workItems)
+    .values({
+      teamId: opts.teamId,
+      createdBy: opts.createdBy,
+      title: opts.title ?? "Test work item",
+      description: opts.description ?? null,
+      type: opts.type ?? "TASK",
+      priority: opts.priority ?? "MEDIUM",
+      status: opts.status ?? "OPEN",
+      assigneeId: opts.assigneeId ?? null,
+      dueAt: opts.dueAt ?? null,
+    })
+    .returning({ id: workItems.id });
+  return row.id;
+}
+
+/** Delete work items belonging to any of the given teams (FK-safe cleanup). */
+export async function deleteWorkItemsForTeams(teamIds: string[]): Promise<void> {
+  if (teamIds.length === 0) return;
+  await db.delete(workItems).where(inArray(workItems.teamId, teamIds));
+}
+
+/** Remove fixture rows in FK-safe order: work items, memberships, users, teams. */
 export async function cleanupFixture(opts: {
   userIds?: string[];
   teamIds?: string[];
 }): Promise<void> {
   const { userIds = [], teamIds = [] } = opts;
+  // Work items reference teams and creator/assignee users with RESTRICT/set-null
+  // foreign keys, so they must go first.
+  await deleteWorkItemsForTeams(teamIds);
   for (const uid of userIds) {
     await db.delete(userTeamMemberships).where(eq(userTeamMemberships.userId, uid));
     await db.delete(users).where(eq(users.id, uid));
