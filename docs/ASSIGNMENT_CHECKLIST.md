@@ -67,9 +67,16 @@
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| DB-001 | Three views: Assigned to Me, Unassigned Urgent, Awaiting My Approval | P0 | All three documented | ARCHITECTURE.md, README | Not Started |
-| DB-002 | Server-side search, filtering, deterministic ordering, cursor pagination | P0 | All features documented | ARCHITECTURE.md | Not Started |
-| DB-003 | Do not load all records into memory/browser | P0 | Constraint documented | ARCHITECTURE.md | Not Started |
+| DB-001 | Three views: Assigned to Me, Unassigned Urgent, Awaiting My Approval | P0 | Documented in ARCHITECTURE.md §9 | ARCHITECTURE.md §9, §15 | Partially implemented — delivered as one server-filtered list; the three presets are blocked (no "unassigned"/role filter). **Requires Architect Review** (ARCHITECTURE.md §15) |
+| DB-002 | Server-side search, filtering, deterministic ordering, cursor pagination | P0 | Filtering/search/ordering server-side; pagination is offset (`page`/`pageSize`), matching the implemented API | frontend/src/pages/ItemsPage.tsx + ItemsPage.test.tsx | Verified (implemented + tested; offset, not cursor) |
+| DB-003 | Do not load all records into memory/browser | P0 | Only one page is fetched; no client-side accumulation | frontend/src/pages/ItemsPage.tsx + api/items.ts | Verified (implemented + tested) |
+| DB-004 | Login form with generic failure messaging; no account enumeration | P0 | Required-field validation; identical failure message for all rejection causes | LoginPage.test.tsx (5 tests) | Verified (implemented + tested) |
+| DB-005 | Session from `GET /auth/me` (user + memberships); invalid/expired auth returns to login | P0 | 401 on a token-carrying request clears session + cache; `/login` for unauthenticated routes | session.test.tsx (5 tests) | Verified (implemented + tested) |
+| DB-006 | Detail view with claim and workflow-transition actions; approval gated to LEAD/ADMIN of the item's team | P0 | Single next workflow step offered; no reopen; approval hidden from MEMBER, shown to LEAD | ItemDetailPage.test.tsx (13 tests) | Verified (implemented + tested) |
+| DB-007 | Create and edit forms; `expectedVersion` from server, never user-settable; no status editing | P0 | PATCH sends fetched version; no `status`/`teamId`/`version` in payload | itemForm.test.ts + ItemEditPage.test.tsx | Verified (implemented + tested) |
+| DB-008 | 409 handling: stale version, lost claim, replayed idempotency key | P0 | Explain + reload (edits preserved); no silent retry/overwrite; distinct messages | ItemEditPage.test.tsx + ItemDetailPage.test.tsx | Verified (implemented + tested) |
+| DB-009 | Loading, empty, error, retry, unauthorized, and not-found states | P0 | All states rendered with accessible messaging and retry where recoverable | StateViews + page tests | Verified (implemented + tested) |
+| DB-010 | Accessibility: semantic structure, labelled controls, keyboard operable, non-colour status | P0 | Landmarks/`h1`, label association, `aria-invalid`/`aria-describedby`, `Enter` submits, text-based status | component + page tests | Verified (implemented + tested) |
 
 ## 8. Collaboration & History
 
@@ -139,7 +146,7 @@
 | RM-004 | Phase 4: Work-item API | P0 | GET/POST /items, GET/PATCH /items/:id implemented with validation, service, repo, tests | Full suite run against Neon (32 items tests) | Verified (complete) |
 | RM-005 | Phase 5: Correctness-critical mutations | P0 | Atomic claim, guarded transitions, optimistic concurrency, DB-backed idempotency, transactional activity + outbox | Full suite run against Neon (114 tests, 29 mutation tests); suite now 131 tests total | Verified (complete) |
 | RM-006 | Phase 6: Critical integration tests | P0 | Six critical behaviors covered by real-PostgreSQL tests with genuine concurrency; plus Phase 6 audit (auth matrix, cross-team isolation, pagination, validation, idempotency guards, migration state) with two defects fixed | `mutations.integration.test.ts` + `verification.integration.test.ts` against Neon (131 tests, 5 files) | Verified (complete — executed) |
-| RM-007 | Phase 7: Functional frontend | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
+| RM-007 | Phase 7: Functional frontend | P0 | Login, shell, filtered/paginated list, detail, create, edit, claim, transitions, conflict + error states implemented; 65 frontend tests across 8 files; typecheck/build exit 0 | `cd frontend && npm test` (65 pass) + `npm run build` | Verified (implemented + tested) — with two items escalated: three dashboard presets, comments/activity (no read endpoints), cursor pagination (ARCHITECTURE.md §15) |
 | RM-008 | Phase 8: Minimal asynchronous worker | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-009 | Phase 9: Submission hardening | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-010 | Deadline: Mon 19 Oct 2026 10:00 AM, target 9:30 AM | P0 | Deadline documented | IMPLEMENTATION_ROADMAP.md | Not Started |

@@ -321,6 +321,51 @@ The Phase 6 brief lists "comment on another team's item" as an isolation case, b
 
 ---
 
+## Implementation Notes (Phase 7 — React Frontend and Operations Dashboard)
+
+Phase 7 built the frontend on the frozen Phase 1–6 API. **No backend file was changed, no endpoint was added, and no decision above was revisited.** Every request the UI makes maps to a route verified in Phase 4–6, and every contract the UI depends on (pagination bounds, `expectedVersion`, idempotency keys, error codes, role capabilities) was read from the backend source rather than assumed.
+
+### A typed client, not scattered `fetch`
+All HTTP goes through `frontend/src/api/client.ts`; `items.ts` / `auth.ts` call it and expose one function per real route. The client owns base URL resolution, bearer attachment, query-string building (empty values dropped), `Idempotency-Key`, and parsing of the backend's `{ error, code, details }` shape into an `ApiError`. Concentrating this means the token is touched in exactly one place and cannot leak into a log or a rendered message.
+
+### Same-origin `/api` proxy instead of a backend CORS change
+The backend was not modified. The frontend targets the same-origin `/api` prefix and Vite proxies `/api/*` to `http://localhost:3000`, rewriting the prefix away. This keeps the browser free of cross-origin requests and avoids loosening the server's origin policy for a development convenience.
+
+### In-memory token, and an honest logout
+The token lives in a module-level store read through `useSyncExternalStore`; there is no `localStorage`/`sessionStorage`. The consequence — a refresh signs the user out — is documented rather than worked around. Because the backend issues stateless tokens and exposes no revocation endpoint, sign-out clears only client-held state (token + query cache) and does not pretend to revoke anything server-side.
+
+### The 401 rule that protects the login screen
+The client invokes the session-expiry handler **only for requests that carried a token**. A failed login is a `401` with no token attached, so it cannot clear a session or be mistaken for expiry. This is why the login call sets `auth: false`.
+
+### Optimistic concurrency surfaced, never hidden
+The edit form submits the `version` it read as `expectedVersion`; the value is never rendered as a control. A `409 STALE_VERSION` produces a conflict message and a **Reload latest version** action that refreshes the version while deliberately **keeping the user's unsaved edits**, then says so. There is no silent retry and no automatic overwrite — the brief's explicit requirement. `409 IDEMPOTENCY_KEY_REUSED` and invalid-transition conflicts are handled as distinct messages.
+
+### Idempotency keys tied to payload, not to clicks
+`useStableIdempotencyKey(fingerprint)` derives the key from a serialisation of the payload. Retrying the same logical request reuses the key (so a duplicate submission replays instead of double-creating); editing the payload mints a new one. This is what makes retry safe without a client-side dedupe table.
+
+### Claim is not optimistic; lost races are recoverable
+The claim button is disabled while in flight and shows pending text; it never assumes success. A `409` (already assigned / not claimable) re-fetches the item and explains the outcome. The same pattern covers a transition that has become invalid or stale. Transitions are derived from a mirror of the backend's edge map, so only the single next step is offered and reopening `CLOSED` is impossible by construction.
+
+### Role checks are convenience, not authorization
+`frontend/src/lib/permissions.ts` mirrors `backend/src/auth/policy.ts` solely to avoid offering controls that would certainly be rejected (e.g. approval is shown only to `LEAD`/`ADMIN` in the item's team). The backend re-authorizes every request; the UI never treats its own check as enforcement. Status is excluded from the general edit form, so status can only change through the transition endpoint.
+
+### Filtering and pagination follow the real contract
+The list sends only the documented parameters, offers page sizes at or below the API maximum of 100, resets to page 1 when filters change, debounces free-text filters, cancels superseded requests with `AbortSignal`, and refuses to send a partially typed assignee id as a query value. `keepPreviousData` keeps the table populated while paging. No page of data is ever accumulated client-side.
+
+### Testing deps added for a declared-but-missing environment
+`frontend/vitest.config.ts` already declared `environment: "jsdom"` and a `setupFiles` entry, but `jsdom` was not installed and there were no test files. Phase 7 added `jsdom` and the `@testing-library/*` dev dependencies so that configuration became real, and wrote 65 tests across 8 files. Only the network boundary is stubbed; the real router, guard, session provider, and API client run. These are client-behaviour tests and are explicitly **not** evidence about backend authorization or security.
+
+### Roadmap Phase 7 items that could not be delivered in-design
+The roadmap's Phase 7 also names three preset dashboard views, a comments section, an activity timeline, and cursor pagination. None of these can be built without backend work that this phase was not authorised to do: there is no "unassigned" filter (so "Unassigned Urgent" is inexpressible), no role predicate on the list endpoint, no comments-read route, no activity-read route, and `GET /items` implements offset rather than cursor pagination. Phase 7 implemented the authorised subset and escalated the gap in `docs/ARCHITECTURE.md` §15 (*Requires Architect Review*) instead of inventing endpoints or faking screens.
+
+### Documented frontend limitations
+- No activity timeline or comments UI (no read endpoints exist).
+- No user/team-member directory, so assignment takes a user UUID (with an "Assign to me" shortcut).
+- A page refresh logs the user out (token is in-memory by design).
+- Offset pagination, matching the API.
+
+---
+
 ## Summary
 
 All five decisions are **final** for the initial implementation:

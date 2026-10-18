@@ -320,21 +320,21 @@ npm run test -- --run integration
 **Goal:** Implement login, the three dashboard views, filtering, item detail, comments, activity timeline, claim/edit/transition actions, and clear conflict handling.
 
 ### Tasks
-- [ ] Set up React + TypeScript frontend with TanStack Query
-- [ ] Implement authentication flow (login, current user context)
-- [ ] Create protected routes and auth guards
-- [ ] Implement Dashboard with three views:
-  - [ ] Assigned to Me
-  - [ ] Unassigned Urgent
-  - [ ] Awaiting My Approval
-- [ ] Implement server-side filtering, search, deterministic ordering, cursor pagination
-- [ ] Implement work item detail view
-- [ ] Implement comments section
-- [ ] Implement activity timeline (append-only history)
-- [ ] Implement actions: claim, edit, transition
-- [ ] Handle conflict responses (409) clearly in UI (stale version, claim lost)
-- [ ] Implement proper error handling and loading states
-- [ ] Ensure no loading of all records into memory/browser
+- [x] Set up React + TypeScript frontend with TanStack Query
+- [x] Implement authentication flow (login, current user context)
+- [x] Create protected routes and auth guards
+- [~] Implement Dashboard with three views — delivered as a single server-filtered list; the three named presets are blocked by missing API filters (see *Status* below)
+  - [~] Assigned to Me (expressible with existing filters, not shipped as a preset)
+  - [ ] Unassigned Urgent (not expressible — no "unassigned" filter on `GET /items`)
+  - [~] Awaiting My Approval (partially expressible — no "teams where I am a Lead" predicate)
+- [x] Implement server-side filtering, search, deterministic ordering, pagination — offset (`page`/`pageSize`), matching the API that actually shipped
+- [x] Implement work item detail view
+- [ ] Implement comments section — **blocked**: no comments read endpoint exists
+- [ ] Implement activity timeline (append-only history) — **blocked**: no activity read endpoint exists
+- [x] Implement actions: claim, edit, transition
+- [x] Handle conflict responses (409) clearly in UI (stale version, claim lost)
+- [x] Implement proper error handling and loading states
+- [x] Ensure no loading of all records into memory/browser
 
 ### Dependencies
 - Phase 5-6 stable backend API
@@ -350,20 +350,30 @@ npm run test -- --run integration
 **Estimated:** 6-8 hours
 
 ### Acceptance Criteria
-- Users can log in with seeded demo accounts
-- All three dashboard views display correctly with team-scoped data
-- Filtering, search, and cursor pagination work server-side
-- Item detail, comments, activity timeline functional
-- Claim, edit, transition actions work with proper authz
-- 409 conflicts (stale update, lost claim) handled with clear user feedback
-- Frontend uses TanStack Query appropriately
-- No full dataset loaded client-side
+- [x] Users can log in with seeded demo accounts
+- [~] All three dashboard views display correctly with team-scoped data — delivered as one team-scoped, server-filtered list; see *Status*
+- [~] Filtering, search, and pagination work server-side — offset pagination, not cursor (matches the implemented API)
+- [~] Item detail functional; comments and activity timeline **not** available (no read endpoints)
+- [x] Claim, edit, transition actions work with proper authz
+- [x] 409 conflicts (stale update, lost claim) handled with clear user feedback
+- [x] Frontend uses TanStack Query appropriately
+- [x] No full dataset loaded client-side
 
 ### Verification Commands
 ```bash
-npm run test -- --run frontend
-npm run build (frontend)
+npm run test -- --run frontend   # -> frontend: npm test (65 tests, 8 files)
+npm run build (frontend)         # -> frontend: npm run build (tsc && vite build)
 ```
+
+### Status (implemented — Phase 7)
+
+Delivered and verified: `frontend npm test` (65 tests / 8 files, jsdom), `npm run typecheck`, `npm run build`, all exit `0`.
+
+Delivered: login with generic failure messaging, in-memory session with `GET /auth/me` identity + memberships, authenticated shell and route guard, server-filtered/paginated work-item list, detail view with claim and workflow-transition actions, create and edit forms with `expectedVersion` optimistic concurrency, stable idempotency keys, explicit stale-version / lost-claim / invalid-transition / forbidden handling, and loading/empty/error/retry/unauthorized states. No backend file was changed and no endpoint was added.
+
+Not delivered, with cause (see `docs/ARCHITECTURE.md` §15 — **Requires Architect Review**): the three named dashboard presets ("Unassigned Urgent" is inexpressible without a new query parameter), the comments section and activity timeline (no read endpoints exist), and cursor pagination (the API implements offset pagination with an exact total). No workaround or fake screen was built.
+
+Commit checkpoint not yet taken — Phase 7 is complete and awaiting review.
 
 ### Fallback Scope
 - Focus on P0 functionality and clear error/conflict handling. Defer visual polish (P2).

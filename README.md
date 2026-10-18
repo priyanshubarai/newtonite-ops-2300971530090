@@ -95,7 +95,7 @@ All views support server-side search, filtering, deterministic ordering, and cur
 
 ## Current Implementation Status
 
-**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), the core work-item API — list, create, detail, update (Phase 4) — and the critical-mutation layer — atomic claim, workflow transitions, optimistic concurrency, idempotency, and transactional activity + outbox (Phase 5) — are implemented and verified. Phase 6 (integration, security, and regression verification) audited Phases 1–5 against the running database and API, fixed two API error-handling defects, and added a focused verification suite that passes against real PostgreSQL. The frontend is scaffolded but product screens are not yet built.
+**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), the core work-item API — list, create, detail, update (Phase 4) — and the critical-mutation layer — atomic claim, workflow transitions, optimistic concurrency, idempotency, and transactional activity + outbox (Phase 5) — are implemented and verified. Phase 6 (integration, security, and regression verification) audited Phases 1–5 against the running database and API, fixed two API error-handling defects, and added a focused verification suite that passes against real PostgreSQL. Phase 7 built the React operations dashboard on top of that API: login and session handling, the authenticated shell, a server-filtered and server-paginated work-item list, detail, create and edit forms, and the claim and workflow-transition actions with explicit conflict handling. Not yet built: the outbox worker (Phase 8) and submission hardening (Phase 9).
 
 See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status of all requirements.
 
@@ -244,9 +244,17 @@ cd backend
 # Run all tests (Vitest). Requires DATABASE_URL + JWT_SECRET in backend/.env.
 npm run test:run
 
+cd ../frontend
+
+# Run the frontend component/unit suite (jsdom; no database or server required).
+npm test
+
 # Type checking
-cd backend && npx tsc --noEmit
-cd ../frontend && npx tsc --noEmit
+cd ../backend && npx tsc --noEmit
+cd ../frontend && npm run typecheck
+
+# Production build (frontend)
+cd ../frontend && npm run build
 
 # Database (Drizzle)
 cd ../backend && npm run db:generate
@@ -254,6 +262,8 @@ cd ../backend && npm run db:migrate
 ```
 
 > **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts`, `src/items/items.integration.test.ts`, `src/items/mutations.integration.test.ts`, and `src/verification.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset. The mutation suite also exercises genuine concurrency (overlapping requests) and reads the committed rows/activity/outbox back to prove the guarantees hold. The Phase 6 verification suite covers API error handling (malformed/oversized bodies), the full unauthenticated-token matrix on the items API, live membership/role changes, cross-team isolation, the pagination contract, input validation, idempotency guards, and live migration state.
+>
+> **Frontend tests** (`frontend/src/**/*.test.ts(x)`) run in jsdom and drive the real route table and the real API client against a stubbed network boundary, so URL building, auth headers, error parsing, conflict handling, and route guards are exercised rather than mocked away. They prove client behaviour only — they make no claim about backend authorization or security, which is covered by the backend integration suites above.
 
 ## Work-Item API (implemented — Phase 4, hardened in Phase 5)
 
@@ -421,6 +431,86 @@ Phase 6 audited Phases 1–5 against the running application and the live Neon d
 - **Verification (all executed against real PostgreSQL, all passing):** authentication boundaries (missing/malformed/expired/forged tokens → `401`); login non-disclosure; response hygiene (no SQL, stack traces, or secrets in error bodies); live membership revocation and role promotion/demotion honoured on the next request; cross-team isolation across every mutation endpoint (`404`); the pagination contract incl. the preserved `pageSize > 100 → 400` rule; `PATCH`/create input validation; idempotency guards (over-long key rejected, validation failures not cached and key not consumed); and the live migration state (the `ITEM_UPDATED` enum value is applied and the two migrations are recorded).
 - **Known limitation confirmed, not fixed here:** there is **no comments endpoint**, so the checklist's "cannot comment on another team's item" case has no matching route to exercise; item-level cross-team isolation is instead verified against every existing mutation endpoint. See the Phase 6 report.
 
+## Frontend (implemented — Phase 7)
+
+The frontend is a React 19 + TypeScript single-page app that consumes only the endpoints that already exist. It adds **no new API routes and no backend changes of its own**.
+
+**Stack and structure**
+
+- `react-router-dom` v7 for routing, `@tanstack/react-query` v5 for server state, plain CSS (`src/styles.css`) with design tokens. No UI component framework was introduced.
+- Layers: `src/api/` (typed client + per-resource modules + DTOs), `src/auth/` (in-memory token store, session provider, route guard), `src/lib/` (constants, formatting, permissions, shared form logic), `src/components/` (presentational), `src/pages/` (routes), `src/test/` (harness, fixtures).
+
+**API access**
+
+- Every request goes through one typed client, `src/api/client.ts`: it attaches the bearer token, builds the query string (dropping empty values), sends `Idempotency-Key`, parses the backend's `{ error, code, details }` error shape into an `ApiError`, and never logs tokens or credentials.
+- Base URL comes from `VITE_API_URL`, defaulting to the same-origin `/api` prefix. In development, `vite.config.ts` proxies `/api/*` to `http://localhost:3000` and strips the prefix, so the browser never makes a cross-origin request and **no backend CORS change was needed**.
+
+**Session handling**
+
+- `POST /auth/login` returns the token; the token is held **in memory only** (`src/auth/tokenStore.ts`) — no `localStorage`/`sessionStorage`. Identity and memberships come from `GET /auth/me` (the router mounts it under `/auth`).
+- Login failures are deliberately generic ("Invalid email or password.") and identical for unknown email, wrong password, and disabled account, so account existence is never revealed.
+- A `401` on an authenticated request clears the token and the query cache and returns the user to `/login`; a failed login (`auth: false`, no token sent) never triggers that path. Logout clears client-held state only — the backend issues stateless tokens and exposes no revocation endpoint, so no fake revocation is performed.
+
+**Routes**
+
+| Route | Screen |
+|---|---|
+| `/login` | Login form |
+| `/` | redirect → `/items` |
+| `/items` | Work-item list (server-side filters + pagination) |
+| `/items/new` | Create form |
+| `/items/:id` | Detail with claim and workflow-transition actions |
+| `/items/:id/edit` | Edit form |
+| `*` | Not-found |
+
+Everything except `/login` sits behind the route guard and the authenticated shell (skip link, header, primary nav, identity, sign-out).
+
+**Server state, filtering, and pagination**
+
+- Query keys: `["me"]`, `["items", filters]`, `["item", id]`. Create invalidates `["items"]`; update/claim/transition write the returned item into `["item", id]` and invalidate `["items"]`.
+- The list is server-filtered and server-paginated — the browser never downloads the collection. `teamId`, `status`, `priority`, `assigneeId`, `search`, `sort`, and `order` map 1:1 onto the documented `GET /items` contract. Page size is offered as 10/20/50/100, so a value above the API maximum of 100 can never be submitted.
+- Changing any filter resets to page 1; free-text filters are debounced (300 ms) and folded into the query atomically so a burst of keystrokes produces one request; an `AbortSignal` cancels superseded requests; `keepPreviousData` avoids a blank table while paging. A partially typed assignee id is shown as a validation hint and is **never sent** as an invalid query parameter.
+
+**Concurrency and conflict UX**
+
+- Edit submits the `version` read from the server as `expectedVersion`. It is never a form field and cannot be set by the user.
+- `409 STALE_VERSION` is surfaced as an explicit conflict with a **Reload latest version** action. Reloading refreshes the version **without discarding the user's unsaved edits**, then tells the user the latest version was loaded; nothing is silently retried or overwritten.
+- `409 IDEMPOTENCY_KEY_REUSED` and other conflict codes are handled distinctly from stale-version conflicts.
+- Idempotency keys are generated per payload fingerprint (`useStableIdempotencyKey`), so a retry of the *same* logical request reuses its key and an edited payload gets a new one.
+- Claim is not optimistic. A 409 from a lost claim race (or a transition that is no longer valid) is treated as recoverable: the item is re-fetched and the outcome explained.
+
+**Claim and workflow**
+
+- The transition control is derived from the approved linear workflow (`OPEN → IN_PROGRESS → AWAITING_APPROVAL → RESOLVED → CLOSED`); only the single next step is ever offered, and reopening is impossible.
+- The transition out of `AWAITING_APPROVAL` is offered only to `LEAD`/`ADMIN` **in the item's own team**; other roles see a plain explanation instead of a control. Role checks are a convenience only — the backend re-authorizes every request.
+- Status is deliberately absent from the general edit form; it changes only through the transition action.
+- The API defines no destructive action (there is no delete), so no confirmation flow was added.
+
+**Accessibility**
+
+Semantic landmarks and one `h1` per screen, a skip link, labelled controls, `aria-invalid`/`aria-describedby` wiring for field errors, visible focus outlines, `aria-live` regions for results and messages, and loading/empty/error/retry states throughout. Status and priority are always conveyed by text (priority adds a non-colour severity mark), never by colour alone. Animations are reduced under `prefers-reduced-motion`.
+
+**Tests**
+
+`frontend npm test` runs 65 tests in 8 files (jsdom). They drive the real route table, the real API client, and the real session provider against a stubbed network boundary, covering: auth header/query/error mapping and the 401-vs-failed-login distinction; login validation, generic failure messaging, session handoff, and keyboard submission; redirect when unauthenticated, loading, rejected-token and failing-session states, and sign-out; list rendering, empty/error/retry, paging, filter-driven page reset, page-size bounds, and role-gated create; create validation, payload shape, backend field errors, double-submit prevention, and idempotency-key reuse/regeneration; edit prefill, `expectedVersion` submission, the stale-version conflict with edit preservation, and permission gating; detail rendering, claim success and lost-race recovery, transition submission with the current version, approval gating by role, invalid/stale/forbidden transition handling, and closed-item terminal state. There is also a unit suite for the shared form validation/payload mapping. **These are client-behaviour tests; they do not prove backend security.**
+
+### Phase 7 scope notes and known limitations
+
+- **No activity timeline or comments UI.** The specification lists both, but the backend exposes no activity-read or comment-read endpoint (only writes), and adding endpoints is out of scope for this phase. The detail view says so in plain language rather than faking the feature.
+- **The three named dashboard views were not built as separate presets.** "Assigned to Me" and "Awaiting My Approval" are expressible with existing filters, but **"Unassigned Urgent" is not**: `GET /items` has no "assignee is null" filter, and "teams where I am a Lead" is not a query the API accepts. Implementing them faithfully would require new backend query parameters, which this phase is not authorised to add. See *Requires Architect Review* in `docs/ARCHITECTURE.md` §15.
+- **No user/team-member directory endpoint**, so the assignee is entered as a user UUID, with an "Assign to me" shortcut for the common case. Filtering by assignee likewise takes a UUID.
+- **A page refresh signs the user out**, because the token is deliberately not persisted to browser storage.
+- **Pagination is offset-based, not cursor-based**, matching what the API actually implements (`page`/`pageSize` with an exact total).
+
+```
+# Run the frontend suite and checks
+cd frontend
+npm test            # 65 tests, 8 files
+npm run typecheck   # tsc --noEmit
+npm run build       # tsc && vite build
+npm run lint        # stub: "lint: not configured"
+```
+
 ## Critical Testing Requirements
 
 The following behaviors are covered by real PostgreSQL integration tests in `src/items/mutations.integration.test.ts` and `src/verification.integration.test.ts` (run with `npm run test:run` in `backend/`). Concurrency cases use genuinely overlapping requests, not sequential calls:
@@ -441,6 +531,9 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 - WebSockets, SSO, email delivery, file attachments are not part of initial implementation
 - Transactional outbox **insertion** is implemented (jobs are written in the same transaction as the mutation); the outbox **worker** that would deliver/process jobs is not implemented in Phase 5.
 - Idempotency records have no automated purge yet (`expires_at` is a retention hint).
+- No activity-history or comments **read** endpoint exists, so the frontend has no activity timeline or comments section (confirmed in Phase 6, restated in Phase 7).
+- The frontend keeps the auth token in memory only, so a page refresh signs the user out (see *Frontend (implemented — Phase 7)*).
+- There is no user/team-member directory endpoint, so assigning work requires a user UUID.
 
 ## Submission Information
 
@@ -452,7 +545,7 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 
 - **Migrations:** the local Drizzle journal (`src/db/migrations/meta/_journal.json`, 2 entries) matches the live database: `drizzle.__drizzle_migrations` holds exactly 2 applied migrations whose recorded timestamps equal the journal's `when` values, and the additive `ITEM_UPDATED` enum value is present in `activity_event_type` with all prior values preserved. Local and remote migration state agree — no discrepancy and no history rewrite.
 - **Seed:** `npm run seed` is idempotent (deterministic UUIDs + `onConflictDoUpdate`, no deletes). Two consecutive runs produced identical totals (`users: 10`, `work_items: 2500`, plus `teams: 4`, `memberships: 14`, `comments: 200`, `activity_events: 600`) with no duplicate rows.
-- **Checks:** backend typecheck, frontend typecheck, and the backend production build all completed with exit code `0`; the full backend suite (unit + integration) passed. Lint is not configured (`npm run lint` is an explicit stub in both packages), and there are no frontend test files.
+- **Checks:** backend typecheck, frontend typecheck, and the backend production build all completed with exit code `0`; the full backend suite (unit + integration) passed. Lint is not configured (`npm run lint` is an explicit stub in both packages). Phase 7 added a frontend test suite (65 tests in 8 files, jsdom) which additionally required the `jsdom`, `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, and `@testing-library/jest-dom` dev dependencies — `jsdom` was already declared in `vitest.config.ts` but the package was missing.
 
 ## License
 

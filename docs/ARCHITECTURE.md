@@ -284,6 +284,8 @@ The following initial endpoints are approved:
 | POST | `/items/:id/comments` | Add comment to work item | Requires team access and appropriate role |
 | GET | `/items/:id/activity` | Get activity history for work item | Requires team access |
 
+> **Implemented paths differ in two places, by design and without conflict.** Authentication is mounted under `/auth`, so the current-user endpoint is `GET /auth/me` (the frontend uses the real path). The two read endpoints for comments and activity history are **not implemented** — the `comments` and `activity_events` tables exist and are written transactionally, but no read route was built (confirmed in Phase 6, unchanged in Phase 7). The frontend therefore renders no activity timeline or comments section rather than inventing an endpoint.
+
 ### HTTP Error Responses
 
 Consistent error handling with appropriate status codes:
@@ -332,6 +334,8 @@ All views must support:
 - Deterministic ordering
 - Cursor pagination
 - No loading of all records into application memory or browser
+
+**Implementation status (Phase 7).** The frontend ships a single list screen with server-side filtering, search, deterministic ordering, and offset pagination over the `GET /items` contract that the API actually implements. The three preset views above were **not** built as named presets: "Assigned to Me" and "Awaiting My Approval" could be expressed with the existing filters, but "Unassigned Urgent" cannot — `GET /items` has no "assignee is null" filter, and "teams where I am a Lead" is not a query the API accepts. Adding those query parameters would be a backend change and is outside the authorised Phase 7 scope. See §15.
 
 ## 10. Performance & Indexing Strategy
 
@@ -436,6 +440,13 @@ graph LR
 - **Test Commands:** Documented in README.md
 - **Phased Testing:** Tests developed throughout implementation, with Phase 6 dedicated to closing critical coverage gaps
 
+### Frontend tests (Phase 7)
+
+- **Environment:** Vitest in `jsdom` via `frontend/vitest.config.ts` (`globals: true`, `restoreMocks`, `unstubGlobals`), with `@testing-library/react` + `user-event` and `jest-dom` matchers.
+- **Boundary:** only the network `fetch` call is stubbed (`src/test/mockFetch.ts`). The real route table, route guard, session provider, API client, and query wiring all run, so URL construction, auth headers, error parsing, and conflict handling are exercised rather than mocked away.
+- **Scope:** client behaviour — session/guard transitions, list filtering/pagination, form validation and payload shape, idempotency-key reuse, conflict and permission messaging, and accessibility basics (label association, keyboard submission, non-colour status).
+- **Non-claim:** the frontend suite is not evidence about backend authorization or security; those remain covered by the real-PostgreSQL integration suites above. Tests are never weakened or skipped to make a run pass.
+
 ## 13. Transaction Boundaries
 
 - **Business mutation + Activity event:** Must commit in the same PostgreSQL transaction
@@ -458,3 +469,18 @@ The following are **not** required for initial implementation but may be conside
 ## 15. Requires Architect Review
 
 There are no known conflicts between this specification and the empty repository state at the time of documentation creation. If any genuine technical conflict is discovered during future implementation that cannot be reconciled without violating the approved specification, it must be documented here with exact details before making conflicting implementation decisions.
+
+### Open item raised in Phase 7 — dashboard views vs. available API
+
+**Conflict:** §9 requires three preset views ("Assigned to Me", "Unassigned Urgent", "Awaiting My Approval") and Phase 7 of the roadmap also lists a comments section, an activity timeline, and cursor pagination. The Phase 7 authorisation limited scope to the endpoints that already exist and explicitly forbade new backend endpoints (outside an approved, verified blocking defect) and any scope expansion.
+
+**Why it cannot be reconciled in-design:**
+
+1. **"Unassigned Urgent" is not expressible.** `GET /items` accepts `assigneeId` only as a specific UUID; there is no "unassigned" filter. Expressing this view would require a new query parameter.
+2. **"Awaiting My Approval" is only partially expressible.** `status=AWAITING_APPROVAL` is supported, but restricting results to teams where the caller is a Lead/Admin is not — the API does not accept a role predicate.
+3. **Comments and activity history have no read endpoint.** `POST /items/:id/comments` is specified but unimplemented, and `GET /items/:id/activity` is unimplemented. The tables exist and are written transactionally. Building either UI requires new routes.
+4. **Pagination is offset-based, not cursor-based.** `GET /items` implements `page`/`pageSize` with an exact `total`; the frontend matches the real contract rather than a cursor contract the API does not provide.
+
+**What was delivered instead, without adding endpoints:** a single server-filtered, server-paginated list (team, status, priority, assignee, search, sort), detail with claim and workflow-transition actions, create and edit forms, and explicit conflict handling. No activity or comments UI is rendered, and the detail view states that activity history is unavailable rather than implying it exists.
+
+**Decision needed:** either add the missing query parameters and read endpoints in a future phase, or amend §9/Phase 7 to accept the single filterable list as the delivered dashboard. Phase 7 made no conflicting change to the specification; it implemented the authorised subset and recorded the gap here.
