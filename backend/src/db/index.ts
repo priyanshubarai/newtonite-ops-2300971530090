@@ -16,4 +16,15 @@ const pool = new Pool({
 // work-item, idempotency, and activity-history modules require interactive
 // transactions. The neon-http driver does not support them.
 export const db = drizzle(pool);
+
+/**
+ * The transaction handle passed to `db.transaction(async (tx) => ...)`.
+ *
+ * Mutation code takes a `TxClient` so that a work-item change, its version
+ * increment, its activity event, its outbox job, and any idempotency record
+ * can all be written on the **same** connection and commit atomically.
+ */
+export type Database = typeof db;
+export type TxClient = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 export { pool };

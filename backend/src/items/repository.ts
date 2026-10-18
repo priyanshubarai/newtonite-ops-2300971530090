@@ -1,6 +1,8 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { db, type TxClient } from "../db/index.js";
 import { workItems } from "../db/schema/work_items.js";
+import { activityEvents } from "../db/schema/activity_events.js";
+import { outboxJobs } from "../db/schema/outbox_jobs.js";
 import type {
   SortDirection,
   SortField,
@@ -15,9 +17,18 @@ import type {
  * sent as a bound parameter - never string-concatenated into SQL. Sorting uses
  * the explicit `SORT_COLUMNS` allowlist so no client string can become an
  * identifier or expression.
+ *
+ * Read queries run on the shared `db` handle. Every **mutation** takes a
+ * `TxClient` so the caller controls the transaction boundary: the work-item
+ * change, its version increment, its activity event, and its outbox job must
+ * commit together. All conditional writes are expressed as a single `UPDATE`
+ * with the precondition in the `WHERE` clause - the database, not application
+ * code, decides the winner under a race.
  */
 
 export type WorkItemRow = typeof workItems.$inferSelect;
+export type NewActivityEvent = typeof activityEvents.$inferInsert;
+export type NewOutboxJob = typeof outboxJobs.$inferInsert;
 
 // Allowlisted sort columns. Kept as a literal map (not a dynamic lookup on the
 // table object) so the set of orderable fields is obvious and closed.
@@ -135,8 +146,15 @@ export interface NewWorkItem {
   dueAt: Date | null;
 }
 
-export async function insertWorkItem(values: NewWorkItem): Promise<WorkItemRow> {
-  const [row] = await db.insert(workItems).values(values).returning();
+/**
+ * Insert a work item on the caller's transaction. `status` defaults to `OPEN`
+ * and `version` to `1` at the database layer; the caller never supplies them.
+ */
+export async function insertWorkItemTx(
+  tx: TxClient,
+  values: NewWorkItem,
+): Promise<WorkItemRow> {
+  const [row] = await tx.insert(workItems).values(values).returning();
   return row;
 }
 
@@ -151,22 +169,107 @@ export type WorkItemUpdate = Partial<{
 }>;
 
 /**
- * Apply an update by id and return the new row (or `null` if it disappeared).
+ * Optimistic-concurrency update: applies `values` and increments `version`
+ * **only** if the stored version still equals `expectedVersion`.
  *
- * Phase 5 will extend this with an optimistic-concurrency guard: add
- * `and(eq(workItems.id, id), eq(workItems.version, expectedVersion))` and
- * `version: sql\`${workItems.version} + 1\`` to the SET clause, treating a
- * zero-row result as a 409. The route/service layering already isolates that
- * change to this function plus its caller, so no API layer needs rewriting.
+ * A zero-row result means either the item is gone or another writer already
+ * bumped the version - the caller maps that to `404`/`409 STALE_VERSION`. The
+ * version is incremented inside the same statement (`version = version + 1`),
+ * so two writers with the same expected version cannot both succeed: the first
+ * commits v+1, the second's `WHERE` no longer matches.
  */
-export async function updateWorkItem(
+export async function updateWorkItemTx(
+  tx: TxClient,
   id: string,
+  expectedVersion: number,
   values: WorkItemUpdate,
 ): Promise<WorkItemRow | null> {
-  const rows = await db
+  const rows = await tx
     .update(workItems)
-    .set(values)
-    .where(eq(workItems.id, id))
+    .set({
+      ...values,
+      version: sql`${workItems.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(workItems.id, id), eq(workItems.version, expectedVersion)))
     .returning();
   return rows[0] ?? null;
+}
+
+/**
+ * Atomic claim: sets the assignee and increments the version **only** if the
+ * item is still unassigned and in one of the claimable statuses. The
+ * precondition lives entirely in the `WHERE` clause, so two concurrent
+ * claimants cannot both win - the loser's update matches zero rows.
+ */
+export async function claimWorkItemTx(
+  tx: TxClient,
+  id: string,
+  assigneeId: string,
+  claimableStatuses: readonly WorkStatus[],
+): Promise<WorkItemRow | null> {
+  const rows = await tx
+    .update(workItems)
+    .set({
+      assigneeId,
+      version: sql`${workItems.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(workItems.id, id),
+        isNull(workItems.assigneeId),
+        inArray(workItems.status, [...claimableStatuses]),
+      ),
+    )
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Workflow transition: moves `status` from `fromStatus` to `toStatus` and
+ * increments the version, but only when the stored version still equals
+ * `expectedVersion` and the stored status still equals `fromStatus`. Both the
+ * version guard (concurrency) and the status guard (workflow) are enforced by
+ * the database.
+ */
+export async function transitionWorkItemTx(
+  tx: TxClient,
+  id: string,
+  expectedVersion: number,
+  fromStatus: WorkStatus,
+  toStatus: WorkStatus,
+): Promise<WorkItemRow | null> {
+  const rows = await tx
+    .update(workItems)
+    .set({
+      status: toStatus,
+      version: sql`${workItems.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(workItems.id, id),
+        eq(workItems.version, expectedVersion),
+        eq(workItems.status, fromStatus),
+      ),
+    )
+    .returning();
+  return rows[0] ?? null;
+}
+
+/** Append an immutable activity event on the caller's transaction. */
+export async function insertActivityEventTx(
+  tx: TxClient,
+  values: NewActivityEvent,
+): Promise<void> {
+  await tx.insert(activityEvents).values(values);
+}
+
+/** Insert a transactional-outbox job on the caller's transaction. */
+export async function insertOutboxJobTx(
+  tx: TxClient,
+  values: NewOutboxJob,
+): Promise<void> {
+  await tx.insert(outboxJobs).values(values);
 }

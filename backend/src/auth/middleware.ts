@@ -3,7 +3,7 @@ import { verifyAuthToken } from "./tokens.js";
 import { findUserById } from "./repository.js";
 
 /**
- * Express middleware工厂 that authenticates a request via a short-lived bearer
+ * Express middleware factory that authenticates a request via a short-lived bearer
  * token. On success it attaches the freshly-loaded user to `req.user`. On any
  * failure it responds 401 and does not call the next handler.
  *

@@ -1,10 +1,14 @@
 import bcrypt from "bcryptjs";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { teams } from "../db/schema/teams.js";
 import { userTeamMemberships } from "../db/schema/memberships.js";
 import { workItems } from "../db/schema/work_items.js";
+import { activityEvents } from "../db/schema/activity_events.js";
+import { comments } from "../db/schema/comments.js";
+import { idempotencyRecords } from "../db/schema/idempotency_records.js";
+import { outboxJobs } from "../db/schema/outbox_jobs.js";
 import { teamRoleEnum } from "../db/schema/enums.js";
 
 type Role = (typeof teamRoleEnum.enumValues)[number];
@@ -107,16 +111,78 @@ export async function deleteWorkItemsForTeams(teamIds: string[]): Promise<void> 
   await db.delete(workItems).where(inArray(workItems.teamId, teamIds));
 }
 
-/** Remove fixture rows in FK-safe order: work items, memberships, users, teams. */
+/** Read one work-item row (used to assert version/status/assignee after a call). */
+export async function getWorkItemRow(id: string) {
+  const rows = await db.select().from(workItems).where(eq(workItems.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** Activity events for a work item, oldest first. */
+export async function listActivityEvents(workItemId: string) {
+  return db
+    .select()
+    .from(activityEvents)
+    .where(eq(activityEvents.workItemId, workItemId))
+    .orderBy(asc(activityEvents.createdAt));
+}
+
+export async function countActivityEvents(workItemId: string): Promise<number> {
+  const rows = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(activityEvents)
+    .where(eq(activityEvents.workItemId, workItemId));
+  return rows[0]?.value ?? 0;
+}
+
+/** Count outbox jobs enqueued for a work item (matched on the payload join key). */
+export async function countOutboxJobs(workItemId: string): Promise<number> {
+  const rows = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(outboxJobs)
+    .where(sql`${outboxJobs.payload}->>'workItemId' = ${workItemId}`);
+  return rows[0]?.value ?? 0;
+}
+
+/**
+ * Remove a fixture's work-item *graph* in FK-safe order. Activity events and
+ * comments reference work items with `ON DELETE RESTRICT`, so they must go
+ * first; outbox jobs have no FK, so they are matched on their payload join key.
+ */
+async function clearWorkItemGraph(teamIds: string[]): Promise<void> {
+  if (teamIds.length === 0) return;
+
+  const owned = await db
+    .select({ id: workItems.id })
+    .from(workItems)
+    .where(inArray(workItems.teamId, teamIds));
+  const itemIds = owned.map((r) => r.id);
+
+  if (itemIds.length > 0) {
+    await db.delete(activityEvents).where(inArray(activityEvents.workItemId, itemIds));
+    await db.delete(comments).where(inArray(comments.workItemId, itemIds));
+    const idList = sql.join(
+      itemIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    await db.delete(outboxJobs).where(sql`${outboxJobs.payload}->>'workItemId' IN (${idList})`);
+  }
+  await db.delete(workItems).where(inArray(workItems.teamId, teamIds));
+}
+
+/** Remove fixture rows in FK-safe order: item graph, idempotency, memberships, users, teams. */
 export async function cleanupFixture(opts: {
   userIds?: string[];
   teamIds?: string[];
 }): Promise<void> {
   const { userIds = [], teamIds = [] } = opts;
-  // Work items reference teams and creator/assignee users with RESTRICT/set-null
-  // foreign keys, so they must go first.
-  await deleteWorkItemsForTeams(teamIds);
+
+  // Work-item graph first: activity events/comments reference items, and items
+  // reference teams/users with RESTRICT/set-null.
+  await clearWorkItemGraph(teamIds);
+
   for (const uid of userIds) {
+    // Idempotency records reference users with RESTRICT.
+    await db.delete(idempotencyRecords).where(eq(idempotencyRecords.userId, uid));
     await db.delete(userTeamMemberships).where(eq(userTeamMemberships.userId, uid));
     await db.delete(users).where(eq(users.id, uid));
   }

@@ -230,7 +230,11 @@ describe("GET /items - listing, scoping, filtering", () => {
       "?page=0",
       "?page=abc",
       "?page=-1",
+      "?page=1.5",
       "?pageSize=0",
+      "?pageSize=-1",
+      "?pageSize=1.5",
+      "?pageSize=abc",
       "?pageSize=101",
       "?teamId=not-a-uuid",
       "?assigneeId=not-a-uuid",
@@ -415,10 +419,8 @@ describe("GET /items/:id - detail", () => {
   });
 });
 
-describe("PATCH /items/:id - update", () => {
-  let itemId: string;
-
-  async function freshItem(): Promise<string> {
+describe("PATCH /items/:id - update (optimistic concurrency)", () => {
+  async function freshItem(assigneeId: string | null = null): Promise<string> {
     return createTestWorkItem({
       teamId: fx.teamA,
       createdBy: fx.leadA,
@@ -427,38 +429,63 @@ describe("PATCH /items/:id - update", () => {
       type: "TASK",
       priority: "MEDIUM",
       status: "OPEN",
-      assigneeId: null,
+      assigneeId,
     });
   }
 
-  beforeAll(async () => {
-    itemId = await freshItem();
-  });
-
   it("requires authentication", async () => {
-    const res = await request(app).patch(`/items/${itemId}`).send({ title: "x" });
+    const itemId = await freshItem();
+    const res = await request(app)
+      .patch(`/items/${itemId}`)
+      .send({ title: "x", expectedVersion: 1 });
     expect(res.status).toBe(401);
   });
 
-  it("lets a MEMBER update permitted fields and preserves version", async () => {
+  it("lets a MEMBER update permitted fields and increments version exactly once", async () => {
+    const itemId = await freshItem();
     const res = await request(app)
       .patch(`/items/${itemId}`)
       .set(authed(tokens.memberA))
-      .send({ title: "Updated title", priority: "HIGH", assigneeId: fx.memberA });
+      .send({ title: "Updated title", priority: "HIGH", assigneeId: fx.memberA, expectedVersion: 1 });
 
     expect(res.status).toBe(200);
     expect(res.body.title).toBe("Updated title");
     expect(res.body.priority).toBe("HIGH");
     expect(res.body.assigneeId).toBe(fx.memberA);
-    expect(res.body.version).toBe(1); // not reset/incremented in Phase 4
-    expect(res.body.status).toBe("OPEN"); // unchanged
+    expect(res.body.version).toBe(2); // version 1 -> 2
+    expect(res.body.status).toBe("OPEN"); // unchanged (status only moves via /transition)
+
+    // The change is persisted, not just echoed.
+    const after = await request(app).get(`/items/${itemId}`).set(authed(tokens.memberA));
+    expect(after.body.version).toBe(2);
+    expect(after.body.title).toBe("Updated title");
+  });
+
+  it("requires an expectedVersion and rejects a stale one with 409 STALE_VERSION", async () => {
+    const itemId = await freshItem();
+
+    // Missing expectedVersion is a validation failure.
+    const missing = await request(app)
+      .patch(`/items/${itemId}`)
+      .set(authed(tokens.memberA))
+      .send({ title: "no version" });
+    expect(missing.status).toBe(400);
+
+    // A wrong version is a conflict.
+    const stale = await request(app)
+      .patch(`/items/${itemId}`)
+      .set(authed(tokens.memberA))
+      .send({ title: "stale", expectedVersion: 99 });
+    expect(stale.status).toBe(409);
+    expect(stale.body.code).toBe("STALE_VERSION");
   });
 
   it("rejects a VIEWER updating with 403", async () => {
+    const itemId = await freshItem();
     const res = await request(app)
       .patch(`/items/${itemId}`)
       .set(authed(tokens.viewerA))
-      .send({ title: "Changed by viewer" });
+      .send({ title: "Changed by viewer", expectedVersion: 1 });
     expect(res.status).toBe(403);
   });
 
@@ -474,11 +501,12 @@ describe("PATCH /items/:id - update", () => {
     const res = await request(app)
       .patch(`/items/${bItem}`)
       .set(authed(tokens.memberA))
-      .send({ title: "hijack" });
+      .send({ title: "hijack", expectedVersion: 1 });
     expect(res.status).toBe(404);
   });
 
   it("rejects protected field changes", async () => {
+    const itemId = await freshItem();
     const cases = [
       { status: "CLOSED" },
       { version: 2 },
@@ -492,13 +520,23 @@ describe("PATCH /items/:id - update", () => {
       const res = await request(app)
         .patch(`/items/${itemId}`)
         .set(authed(tokens.memberA))
-        .send(body);
+        .send({ ...body, expectedVersion: 1 });
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
   });
 
   it("rejects invalid and empty updates", async () => {
-    const cases = [{}, { priority: "BOGUS" }, { title: "" }, { type: "NOPE" }, { dueAt: "not-a-date" }];
+    const itemId = await freshItem();
+    const cases = [
+      {},
+      { expectedVersion: 1 }, // no updatable field
+      { priority: "BOGUS", expectedVersion: 1 },
+      { title: "", expectedVersion: 1 },
+      { type: "NOPE", expectedVersion: 1 },
+      { dueAt: "not-a-date", expectedVersion: 1 },
+      { title: "x", expectedVersion: 0 },
+      { title: "x", expectedVersion: "two" },
+    ];
     for (const body of cases) {
       const res = await request(app)
         .patch(`/items/${itemId}`)
@@ -510,35 +548,52 @@ describe("PATCH /items/:id - update", () => {
 
   it("rejects assigning a user outside the item's team", async () => {
     for (const assigneeId of [fx.memberB, fx.outsider]) {
+      const itemId = await freshItem();
       const res = await request(app)
         .patch(`/items/${itemId}`)
         .set(authed(tokens.memberA))
-        .send({ assigneeId });
+        .send({ assigneeId, expectedVersion: 1 });
       expect(res.status, `assignee ${assigneeId}`).toBe(400);
     }
   });
 
   it("allows clearing the assignee with null", async () => {
+    const itemId = await freshItem(fx.memberA);
     const res = await request(app)
       .patch(`/items/${itemId}`)
       .set(authed(tokens.memberA))
-      .send({ assigneeId: null });
+      .send({ assigneeId: null, expectedVersion: 1 });
     expect(res.status).toBe(200);
     expect(res.body.assigneeId).toBeNull();
+    expect(res.body.version).toBe(2);
   });
 
   it("returns 404 for malformed and unknown ids", async () => {
     expect(
-      (await request(app).patch("/items/not-a-uuid").set(authed(tokens.memberA)).send({ title: "x" }))
-        .status,
+      (
+        await request(app)
+          .patch("/items/not-a-uuid")
+          .set(authed(tokens.memberA))
+          .send({ title: "x", expectedVersion: 1 })
+      ).status,
     ).toBe(404);
     expect(
       (
         await request(app)
           .patch("/items/00000000-0000-4000-8000-000000000000")
           .set(authed(tokens.memberA))
-          .send({ title: "x" })
+          .send({ title: "x", expectedVersion: 1 })
       ).status,
     ).toBe(404);
+  });
+
+  it("cannot change the stored version directly (client-sent version is rejected)", async () => {
+    const itemId = await freshItem();
+    const res = await request(app)
+      .patch(`/items/${itemId}`)
+      .set(authed(tokens.memberA))
+      .send({ title: "sneaky", version: 99, expectedVersion: 1 });
+    expect(res.status).toBe(400);
+    expect((await request(app).get(`/items/${itemId}`).set(authed(tokens.memberA))).body.version).toBe(1);
   });
 });

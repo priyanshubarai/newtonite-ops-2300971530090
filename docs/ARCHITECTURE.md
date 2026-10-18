@@ -290,11 +290,14 @@ Consistent error handling with appropriate status codes:
 
 | Status | Usage |
 |---|---|
-| 401 | Unauthenticated requests |
-| 403 | Forbidden actions (insufficient permissions) |
-| 404 | Resource not found / concealment appropriate |
-| 409 | Conflicts (concurrent claim lost, stale version, key reuse) |
-| 422/400 | Validation errors for invalid requests |
+| 400 | Validation errors: invalid body/query, unknown or protected fields, malformed JSON, out-of-range pagination |
+| 401 | Unauthenticated requests (missing, malformed, expired, or forged token) |
+| 403 | Forbidden actions (insufficient permissions within a team) |
+| 404 | Resource not found / concealment appropriate (non-member team, malformed id) |
+| 409 | Conflicts (concurrent claim lost, stale version, invalid transition, key reuse) |
+| 413 | Request body exceeds the JSON parser limit |
+
+Errors never leak stack traces, SQL, or secrets; an unexpected server failure returns a generic `500`.
 
 ## 8. Critical Behaviors & Correctness
 
@@ -305,7 +308,7 @@ The following behaviors must be correctly implemented and tested:
 | **Concurrent claim** | Two concurrent requests claim the same unassigned item | Exactly one succeeds; the other receives 409 Conflict |
 | **Stale update** | Update submitted with old version number | Rejected with 409 Conflict; newer data remains intact; version unchanged |
 | **Idempotency** | Same request with same idempotency key retried | Produces one logical operation; returns original result |
-| **Workflow enforcement** | Invalid transition or unauthorized approval attempted | Request fails with appropriate error (403/422) |
+| **Workflow enforcement** | Invalid transition or unauthorized approval attempted | `409 INVALID_TRANSITION` for an invalid edge; `403` for an under-privileged approval (`404` for a non-member) |
 | **Resource authorization** | Access attempt from user not in item's team | Denied (403/404 as appropriate for concealment) |
 | **Audit atomicity** | Activity event insert fails in same transaction as mutation | Entire transaction rolls back; work item mutation is not persisted |
 
@@ -439,7 +442,7 @@ graph LR
 - **Business mutation + Outbox job:** Must commit in the same PostgreSQL transaction (for transactional outbox pattern)
 - **Atomic claim:** Conditional UPDATE with WHERE clause (item unassigned AND team matches) to ensure exactly one winner
 - **Optimistic concurrency:** UPDATE with version check (version = expected) AND increment version on success
-- **Idempotency:** Check existing record by key first; on conflict with different request, reject with appropriate error
+- **Idempotency:** Serialize same-key requests with a transaction-scoped `pg_advisory_xact_lock` as the first statement, backed by a `(scope, key)` unique index; the record commits with the mutation. Same key + same payload replays the stored response; same key + different payload → `409 IDEMPOTENCY_KEY_REUSED`
 
 ## 14. Future Scaling Considerations (Not Initial)
 

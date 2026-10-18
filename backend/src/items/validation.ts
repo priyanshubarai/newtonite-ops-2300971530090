@@ -50,6 +50,10 @@ export const listItemsQuerySchema = z.object({
     .number()
     .int("page must be an integer")
     .min(1, "page must be at least 1")
+    // Cap at the largest safe integer. `page` is multiplied by `pageSize` to
+    // form the OFFSET; without a bound an absurd value overflows PostgreSQL's
+    // bigint and would surface as a 500. Reject it as a 400 instead.
+    .max(Number.MAX_SAFE_INTEGER, "page is too large")
     .default(1),
   pageSize: z.coerce
     .number()
@@ -92,11 +96,20 @@ export const createItemSchema = z
 export type CreateItemInput = z.infer<typeof createItemSchema>;
 
 /**
- * `PATCH /items/:id` body. Only editable fields are accepted; `.strict()`
- * rejects protected fields (id, teamId, createdBy, status, version, createdAt,
- * updatedAt). The refine rejects an empty update so a no-op PATCH is a 400
- * rather than a silent 200.
+ * `PATCH /items/:id` body. Only editable fields are accepted (plus the
+ * concurrency control `expectedVersion`); `.strict()` rejects protected fields
+ * (id, teamId, createdBy, status, version, createdAt, updatedAt). The refine
+ * rejects a body with no *updatable* field so a no-op PATCH is a 400 rather
+ * than a silent 200.
+ *
+ * `expectedVersion` is the version the client last read. It is a precondition
+ * only - the server never accepts it as the new stored version.
  */
+export const expectedVersionField = z
+  .number({ invalid_type_error: "expectedVersion must be a number" })
+  .int("expectedVersion must be an integer")
+  .min(1, "expectedVersion must be at least 1");
+
 export const updateItemSchema = z
   .object({
     title: z
@@ -117,12 +130,27 @@ export const updateItemSchema = z
     priority: workPriority.optional(),
     dueAt: z.coerce.date().nullable().optional(),
     assigneeId: uuid("assigneeId").nullable().optional(),
+    expectedVersion: expectedVersionField,
   })
   .strict()
-  .refine((value) => Object.keys(value).length > 0, {
+  .refine((value) => Object.keys(value).some((k) => k !== "expectedVersion"), {
     message: "at least one updatable field is required",
+    path: ["expectedVersion"],
   });
 export type UpdateItemInput = z.infer<typeof updateItemSchema>;
+
+/**
+ * `POST /items/:id/transition` body. The target status must be a real status
+ * value; the exact edge is validated server-side against the item's current
+ * status. `expectedVersion` is the same concurrency precondition as PATCH.
+ */
+export const transitionItemSchema = z
+  .object({
+    toStatus: workStatus,
+    expectedVersion: expectedVersionField,
+  })
+  .strict();
+export type TransitionItemInput = z.infer<typeof transitionItemSchema>;
 
 /** Route param contract for `/items/:id`. */
 export const itemIdSchema = z.string().uuid("id must be a valid UUID");

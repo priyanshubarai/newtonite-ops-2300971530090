@@ -1,25 +1,50 @@
 import { authorizeTeamAction, type AuthzResult } from "../auth/authorize.js";
 import { getMembershipsForUser, getTeamRole } from "../auth/repository.js";
-import { badRequest, forbidden, notFound } from "../common/errors.js";
+import { badRequest, conflict, ERROR_CODES, forbidden, notFound } from "../common/errors.js";
+import type { TxClient } from "../db/index.js";
 import {
+  claimWorkItemTx,
   findWorkItemById,
-  insertWorkItem,
+  insertActivityEventTx,
+  insertOutboxJobTx,
+  insertWorkItemTx,
   listWorkItems,
-  updateWorkItem,
+  transitionWorkItemTx,
+  updateWorkItemTx,
   type WorkItemRow,
+  type WorkItemUpdate,
 } from "./repository.js";
+import {
+  assigneeChangedEvent,
+  deriveUpdateEvents,
+  itemCreatedEvent,
+  statusChangedEvent,
+  type DerivedEvent,
+} from "./activity.js";
+import { buildOutboxJob, OUTBOX_JOB_TYPES } from "./outbox.js";
 import { toWorkItemResponse, type WorkItemResponse } from "./serialize.js";
-import type { CreateItemInput, ListItemsQuery, UpdateItemInput } from "./validation.js";
+import {
+  CLAIMABLE_STATUSES,
+  assertValidTransition,
+  isApprovalStep,
+} from "./workflow.js";
+import type {
+  CreateItemInput,
+  ListItemsQuery,
+  TransitionItemInput,
+  UpdateItemInput,
+} from "./validation.js";
 
 /**
  * Work-item domain service.
  *
- * Responsibilities: resolve the caller's team memberships from the database,
- * enforce team-scoped authorization, apply business rules (same-team
- * assignment, server-owned fields), and delegate persistence to the repository.
- * Route handlers stay thin and only translate this layer's results (or thrown
- * `ApiError`s) into HTTP responses.
+ * Responsibilities: resolve the caller's team memberships, enforce team-scoped
+ * authorization, apply business rules (same-team assignment, workflow),
+ * perform the mutation on the caller's transaction, and append the matching
+ * activity event + outbox job in that same transaction.
  *
+ * Reads run on the shared connection; **every mutation takes a `TxClient`** so
+ * the caller (an idempotency-aware route) controls the transaction boundary.
  * Authorization always uses the resource's REAL team id loaded from the
  * database - never a client-supplied team id or role.
  */
@@ -59,6 +84,9 @@ function toPage(items: WorkItemRow[], total: number, page: number, pageSize: num
 function throwAuthzFailure(result: Extract<AuthzResult, { ok: false }>): never {
   throw result.status === 404 ? notFound() : forbidden();
 }
+
+const staleVersion = () =>
+  conflict(ERROR_CODES.STALE_VERSION, "Work item was modified by another request");
 
 /**
  * List work items the caller may see.
@@ -122,13 +150,35 @@ export async function getItem(userId: string, id: string): Promise<WorkItemRespo
   return toWorkItemResponse(row);
 }
 
+/** Append every derived activity event and one outbox job for a mutation. */
+async function recordMutation(
+  tx: TxClient,
+  row: WorkItemRow,
+  actorId: string,
+  events: DerivedEvent[],
+  jobType: (typeof OUTBOX_JOB_TYPES)[keyof typeof OUTBOX_JOB_TYPES],
+): Promise<void> {
+  for (const event of events) {
+    await insertActivityEventTx(tx, {
+      workItemId: row.id,
+      actorId,
+      eventType: event.eventType,
+      metadata: event.metadata,
+    });
+  }
+  await insertOutboxJobTx(tx, buildOutboxJob(row, jobType, actorId));
+}
+
 /**
  * Create a work item in a team the caller can write to.
  *
  * `createdBy`, `status`, and `version` are set by the server; the validated
  * input cannot carry them. An optional assignee must belong to the same team.
+ * The insert, its `ITEM_CREATED` activity event, and its outbox job are written
+ * on the caller's transaction.
  */
 export async function createItem(
+  tx: TxClient,
   userId: string,
   input: CreateItemInput,
 ): Promise<WorkItemResponse> {
@@ -141,7 +191,7 @@ export async function createItem(
     await assertSameTeamMember(input.assigneeId, input.teamId);
   }
 
-  const row = await insertWorkItem({
+  const row = await insertWorkItemTx(tx, {
     title: input.title,
     description: input.description ?? null,
     type: input.type,
@@ -152,17 +202,21 @@ export async function createItem(
     dueAt: input.dueAt ?? null,
   });
 
+  await recordMutation(tx, row, userId, [itemCreatedEvent(row)], OUTBOX_JOB_TYPES.ITEM_CREATED);
   return toWorkItemResponse(row);
 }
 
 /**
- * Update permitted fields of an existing work item.
+ * Update permitted fields of an existing work item under optimistic
+ * concurrency.
  *
- * Authorization is resolved against the item's actual team. Protected and
- * server-managed fields are rejected by the schema before reaching here; this
- * function never touches `status` or `version`.
+ * The write is conditional on `expectedVersion`; a mismatch is a 409
+ * `STALE_VERSION` with no side effects. A PATCH whose values already match the
+ * stored row is a no-op: it validates the version but performs no write, so no
+ * spurious version bump or activity event is produced.
  */
 export async function updateItem(
+  tx: TxClient,
   userId: string,
   id: string,
   input: UpdateItemInput,
@@ -181,19 +235,147 @@ export async function updateItem(
     await assertSameTeamMember(input.assigneeId, existing.teamId);
   }
 
-  const patch: Parameters<typeof updateWorkItem>[1] = {};
-  if (input.title !== undefined) patch.title = input.title;
-  if (input.description !== undefined) patch.description = input.description;
-  if (input.type !== undefined) patch.type = input.type;
-  if (input.priority !== undefined) patch.priority = input.priority;
-  if (input.assigneeId !== undefined) patch.assigneeId = input.assigneeId;
-  if (input.dueAt !== undefined) patch.dueAt = input.dueAt;
+  const { expectedVersion, ...editable } = input;
+  const patch: WorkItemUpdate = {};
+  if (editable.title !== undefined) patch.title = editable.title;
+  if (editable.description !== undefined) patch.description = editable.description;
+  if (editable.type !== undefined) patch.type = editable.type;
+  if (editable.priority !== undefined) patch.priority = editable.priority;
+  if (editable.assigneeId !== undefined) patch.assigneeId = editable.assigneeId;
+  if (editable.dueAt !== undefined) patch.dueAt = editable.dueAt;
 
-  const row = await updateWorkItem(id, patch);
+  const events = deriveUpdateEvents(existing, patch);
+  if (events.length === 0) {
+    // Nothing actually changed. Still honour the concurrency precondition.
+    if (existing.version !== expectedVersion) {
+      throw staleVersion();
+    }
+    return toWorkItemResponse(existing);
+  }
+
+  const row = await updateWorkItemTx(tx, id, expectedVersion, patch);
   if (!row) {
+    // Either the item disappeared or another writer moved the version on.
+    const current = await findWorkItemById(id);
+    if (!current) {
+      throw notFound();
+    }
+    throw staleVersion();
+  }
+
+  await recordMutation(tx, row, userId, events, OUTBOX_JOB_TYPES.ITEM_UPDATED);
+  return toWorkItemResponse(row);
+}
+
+/**
+ * Atomically claim an unassigned, claimable work item for the calling user.
+ *
+ * The assignee is always the authenticated user - never a client-supplied id.
+ * The claim is a single conditional `UPDATE` (`assignee_id IS NULL` and status
+ * claimable) that increments the version, so under a race exactly one claimant
+ * wins and the loser matches zero rows and gets a 409.
+ */
+export async function claimItem(
+  tx: TxClient,
+  userId: string,
+  id: string,
+): Promise<WorkItemResponse> {
+  const existing = await findWorkItemById(id);
+  if (!existing) {
     throw notFound();
   }
 
+  const authz = await authorizeTeamAction(userId, existing.teamId, "claim_item");
+  if (!authz.ok) {
+    throwAuthzFailure(authz);
+  }
+
+  if (existing.assigneeId !== null) {
+    throw conflict(ERROR_CODES.ALREADY_ASSIGNED, "Work item is already assigned");
+  }
+  if (!CLAIMABLE_STATUSES.includes(existing.status)) {
+    throw conflict(
+      ERROR_CODES.NOT_CLAIMABLE,
+      `A work item in status ${existing.status} cannot be claimed`,
+    );
+  }
+
+  const row = await claimWorkItemTx(tx, id, userId, CLAIMABLE_STATUSES);
+  if (!row) {
+    // Lost the race. Classify from the committed row without a second write.
+    const current = await findWorkItemById(id);
+    if (!current) {
+      throw notFound();
+    }
+    if (current.assigneeId !== null) {
+      throw conflict(ERROR_CODES.ALREADY_ASSIGNED, "Work item is already assigned");
+    }
+    throw conflict(ERROR_CODES.NOT_CLAIMABLE, "Work item is no longer claimable");
+  }
+
+  await recordMutation(
+    tx,
+    row,
+    userId,
+    [assigneeChangedEvent(null, userId, "claim")],
+    OUTBOX_JOB_TYPES.ITEM_CLAIMED,
+  );
+  return toWorkItemResponse(row);
+}
+
+/**
+ * Advance a work item along the approved workflow.
+ *
+ * Authorization precedes transition validation so an unprivileged caller
+ * cannot probe the state machine: non-members get 404, members without the
+ * required action get 403, and only then is an invalid edge reported as 409.
+ * The approval edge (`AWAITING_APPROVAL -> RESOLVED`) requires
+ * `approve_transition` (LEAD/ADMIN of the item's own team); every other edge
+ * requires ordinary edit rights (MEMBER+).
+ */
+export async function transitionItem(
+  tx: TxClient,
+  userId: string,
+  id: string,
+  input: TransitionItemInput,
+): Promise<WorkItemResponse> {
+  const existing = await findWorkItemById(id);
+  if (!existing) {
+    throw notFound();
+  }
+
+  const requiredAction = isApprovalStep(existing.status, input.toStatus)
+    ? "approve_transition"
+    : "edit_item";
+  const authz = await authorizeTeamAction(userId, existing.teamId, requiredAction);
+  if (!authz.ok) {
+    throwAuthzFailure(authz);
+  }
+
+  assertValidTransition(existing.status, input.toStatus);
+
+  const row = await transitionWorkItemTx(
+    tx,
+    id,
+    input.expectedVersion,
+    existing.status,
+    input.toStatus,
+  );
+  if (!row) {
+    const current = await findWorkItemById(id);
+    if (!current) {
+      throw notFound();
+    }
+    throw staleVersion();
+  }
+
+  await recordMutation(
+    tx,
+    row,
+    userId,
+    [statusChangedEvent(existing.status, row.status)],
+    OUTBOX_JOB_TYPES.ITEM_TRANSITIONED,
+  );
   return toWorkItemResponse(row);
 }
 

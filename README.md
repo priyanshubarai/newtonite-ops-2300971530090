@@ -95,13 +95,13 @@ All views support server-side search, filtering, deterministic ordering, and cur
 
 ## Current Implementation Status
 
-**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), and the core work-item API — list, create, detail, update (Phase 4) — are implemented and verified. The frontend is scaffolded but product screens are not yet built.
+**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), authentication + team-scoped authorization (Phase 3), the core work-item API — list, create, detail, update (Phase 4) — and the critical-mutation layer — atomic claim, workflow transitions, optimistic concurrency, idempotency, and transactional activity + outbox (Phase 5) — are implemented and verified. Phase 6 (integration, security, and regression verification) audited Phases 1–5 against the running database and API, fixed two API error-handling defects, and added a focused verification suite that passes against real PostgreSQL. The frontend is scaffolded but product screens are not yet built.
 
 See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status of all requirements.
 
-## Development Setup (Planned)
+## Development Setup
 
-*The following setup instructions will be finalized during implementation phases. No working commands, credentials, or deployments are assumed in this documentation.*
+*The commands below were executed and verified during Phase 6 against the configured Neon database (install → migrate → seed → test → typecheck → build). No credentials are committed; supply your own `backend/.env`.*
 
 ### Prerequisites
 - Node.js (LTS)
@@ -163,7 +163,7 @@ npx tsc --noEmit     # typecheck
 npm run db:generate  # generate migrations
 npm run db:migrate   # apply migrations to Neon
 npm run seed         # seed demo data (idempotent)
-npm run test:run     # vitest (no test files until Phase 6)
+npm run test:run     # vitest (unit + real-PostgreSQL integration suites; see Testing)
 ```
 
 ## Authentication & Authorization (implemented — Phase 3)
@@ -253,11 +253,11 @@ cd ../backend && npm run db:generate
 cd ../backend && npm run db:migrate
 ```
 
-> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts` and `src/items/items.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset.
+> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts`, `src/items/items.integration.test.ts`, `src/items/mutations.integration.test.ts`, and `src/verification.integration.test.ts` run against the configured Neon database and create/clean up their own throwaway fixtures — they never mutate the seeded demo dataset. The mutation suite also exercises genuine concurrency (overlapping requests) and reads the committed rows/activity/outbox back to prove the guarantees hold. The Phase 6 verification suite covers API error handling (malformed/oversized bodies), the full unauthenticated-token matrix on the items API, live membership/role changes, cross-team isolation, the pagination contract, input validation, idempotency guards, and live migration state.
 
-## Work-Item API (implemented — Phase 4)
+## Work-Item API (implemented — Phase 4, hardened in Phase 5)
 
-Phase 4 adds the first work-item endpoints: listing, creation, detail, and partial update. All require authentication (see Phase 3) and every query is scoped to the caller's team memberships.
+Phase 4 added listing, creation, detail, and partial update. Phase 5 added atomically-claimed work, guarded workflow transitions, optimistic concurrency on every mutation, database-backed idempotency, and transactional activity + outbox writes. All require authentication (see Phase 3) and every query is scoped to the caller's team memberships.
 
 ### Endpoints
 
@@ -266,11 +266,13 @@ Phase 4 adds the first work-item endpoints: listing, creation, detail, and parti
 | `GET /items` | Required | List work items visible to the caller, with filtering, search, sorting, and pagination. |
 | `POST /items` | Required | Create a work item in a team the caller can write to. |
 | `GET /items/:id` | Required | Fetch one work item. |
-| `PATCH /items/:id` | Required | Update permitted fields of one work item. |
+| `PATCH /items/:id` | Required | Update permitted fields under optimistic concurrency. |
+| `POST /items/:id/claim` | Required | Atomically claim an unassigned, claimable item for the caller. |
+| `POST /items/:id/transition` | Required | Advance the item along the approved workflow. |
 
 ### Team scoping
 
-The caller only ever sees items from teams they are a member of. `GET /items` filters by the caller's team ids; `GET /items/:id` and `PATCH /items/:id` load the item first and authorize against the item's **real** team id from the database (never a client-supplied one).
+The caller only ever sees items from teams they are a member of. `GET /items` filters by the caller's team ids; every `/:id` endpoint (detail, update, claim, transition) loads the item first and authorizes against the item's **real** team id from the database (never a client-supplied one).
 
 - No membership in the item's team → `404` (conceals existence; prevents cross-team enumeration).
 - A member whose role lacks the action → `403`.
@@ -285,8 +287,8 @@ The caller only ever sees items from teams they are a member of. `GET /items` fi
 | `priority` | — | One of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. |
 | `assigneeId` | — | UUID. |
 | `search` | — | Case-insensitive substring match over `title` and `description`; max 200 chars; `%` and `_` are matched literally (no wildcard injection). |
-| `page` | `1` | Integer ≥ 1. |
-| `pageSize` | `20` | Integer 1–100. Values above the cap are **rejected with `400`**, not silently clamped. |
+| `page` | `1` | Integer ≥ 1 and ≤ `Number.MAX_SAFE_INTEGER`. Omitted → `1`. Zero, negative, non-integer, or absurdly large values (which would overflow the SQL `OFFSET`) are **rejected with `400`**. |
+| `pageSize` | `20` | Integer 1–100. Omitted → `20`. Values below 1, above 100, or non-integer are **rejected with `400`**, never silently clamped. |
 | `sort` | `updatedAt` | Allowlisted: `createdAt`, `updatedAt`, `priority`, `dueAt`. |
 | `order` | `desc` | `asc` or `desc`. |
 
@@ -323,33 +325,112 @@ Response:
 
 ### `PATCH /items/:id` body
 
-A subset of `title`, `description`, `type`, `priority`, `dueAt`, `assigneeId`. The body must contain at least one of these; an empty body or any protected field is rejected with `400`. This endpoint never changes `status`, `version`, `teamId`, or `createdBy`.
+```json
+{
+  "title": "…", "priority": "HIGH",
+  "assigneeId": "<uuid>|null", "expectedVersion": 3
+}
+```
+
+A subset of `title`, `description`, `type`, `priority`, `dueAt`, `assigneeId`, plus the **required** `expectedVersion` (see below). The body must contain at least one editable field; an empty body or any protected field (`status`, `version`, `teamId`, `createdBy`, `id`, timestamps) is rejected with `400`. This endpoint never changes `status`, `teamId`, or `createdBy`, and a client can never set `version`.
+
+### Version contract (optimistic concurrency)
+
+- Every work item has an integer `version` starting at `1`.
+- Each **successful mutation that changes the item** increments the version **exactly once** (`version = version + 1`), server-side. A successful request never accepts the caller's number as the stored version.
+- `PATCH` and `transition` require `expectedVersion` in the body. If it does not equal the stored version the request is rejected with **`409` `STALE_VERSION`**, with **no** change, no activity event, and no outbox job — and there is no automatic retry.
+- `claim` is conditional on the item being *unassigned and claimable* rather than on a version (claim-specific behavior); it still increments the version once on success.
+- A `PATCH` whose supplied values already match the stored row is a no-op: the version is checked but not incremented, and no event is written.
+- All conditional writes are single SQL `UPDATE`s with the precondition in the `WHERE` clause (plus the `(scope, key)` uniqueness constraint and a transaction-scoped advisory lock for idempotency), so correctness does not depend on application-level locking or a read-then-write race.
+
+### `POST /items/:id/claim`
+
+- No request body.
+- Preconditions: the item is **unassigned** and in a **claimable** status (`OPEN` or `IN_PROGRESS`). `AWAITING_APPROVAL`, `RESOLVED`, and `CLOSED` are not claimable.
+- Requires `claim_item` (MEMBER/LEAD/ADMIN of the item's team). The assignee is always the authenticated caller — never a client-supplied id.
+- Implemented as a single conditional `UPDATE ... WHERE id = ? AND assignee_id IS NULL AND status IN (...)` that also increments the version. Under a race **exactly one** claimant wins; the loser receives `409` (`ALREADY_ASSIGNED` or `NOT_CLAIMABLE`) and writes nothing.
+- On success: `ASSIGNEE_CHANGED` activity event + one outbox job, committed in the same transaction.
+
+### `POST /items/:id/transition` body
+
+```json
+{ "toStatus": "IN_PROGRESS", "expectedVersion": 1 }
+```
+
+- Allowed edges are exactly `OPEN → IN_PROGRESS → AWAITING_APPROVAL → RESOLVED → CLOSED`. Skipping a state, moving backwards, or reopening a `CLOSED` item is rejected with **`409` `INVALID_TRANSITION`**. Clients cannot set `status` through `PATCH`.
+- Ordinary progression (`OPEN → IN_PROGRESS`, `IN_PROGRESS → AWAITING_APPROVAL`, `RESOLVED → CLOSED`) requires MEMBER/LEAD/ADMIN (`edit_item`).
+- The approval edge `AWAITING_APPROVAL → RESOLVED` requires **LEAD/ADMIN of the item's own team** (`approve_transition`). A Viewer or Member gets `403`; a Lead/Admin who is not a member of that team gets `404`.
+- A stale `expectedVersion` yields `409` `STALE_VERSION` with no side effects.
+- On success: `STATUS_CHANGED` activity event + one outbox job, committed in the same transaction.
+
+### Idempotency (`Idempotency-Key`)
+
+The four mutation endpoints (`POST /items`, `PATCH /items/:id`, `POST /items/:id/claim`, `POST /items/:id/transition`) accept an optional `Idempotency-Key` header (max 255 chars).
+
+- Keys are scoped to the **authenticated user + endpoint**.
+- Same key + **same** payload → the original status and body are replayed; the mutation is **not** re-run.
+- Same key + **different** payload → `409` `IDEMPOTENCY_KEY_REUSED`.
+- Concurrent duplicates are serialized by a PostgreSQL **transaction-scoped advisory lock** taken as the first statement of the transaction, so a duplicate arriving mid-flight waits for the winner to commit and then replays — exactly one business effect. The `(scope, key)` unique index is the database-enforced backstop.
+- The idempotency record is written **in the same transaction** as the item change, its activity event, and its outbox job, so they commit together (or not at all). A request is never marked successful before the business work commits.
+- A failed request (validation, authorization, or conflict) rolls back the whole transaction including the idempotency record, so failures are never cached as successes and do not consume the key.
+- Records carry an `expires_at` retention hint (24h). There is no automated purge in this phase.
+
+### Activity events and the transactional outbox
+
+- Every successful mutation writes at least one **activity event** in the same transaction: `ITEM_CREATED` (create), `PRIORITY_CHANGED`/`ASSIGNEE_CHANGED`/`ITEM_UPDATED` (per changed category on update), `ASSIGNEE_CHANGED` (claim), `STATUS_CHANGED` (transition). `metadata` carries the before/after values.
+- Every successful mutation also enqueues exactly one **outbox job** (`job_type` = `work_item.created`/`updated`/`claimed`/`transitioned`; payload `{ workItemId, teamId, actorId, status, version }`), inserted in the same transaction as the mutation.
+- Failed, stale, unauthorized, and losing requests produce **no** activity event and **no** outbox job.
+- There is **no outbox worker** in this phase: jobs are durably enqueued only; delivery is future work.
 
 ### Error semantics
 
 | Status | When |
 |---|---|
-| `400` | Invalid body/query: bad enum values, malformed UUIDs **in the body**, unknown or protected fields, empty PATCH, out-of-range pagination, cross-team assignee. |
+| `400` | Invalid body/query: bad enum values, malformed UUIDs **in the body**, unknown or protected fields, empty PATCH, missing/invalid `expectedVersion`, over-long `Idempotency-Key`, out-of-range pagination, cross-team assignee. |
 | `401` | Missing or invalid bearer token. |
-| `403` | Authenticated member whose role lacks the action (e.g. a Viewer creating or editing). |
-| `404` | Item missing, item belongs to a non-member team, or the `:id` is malformed (fail-closed). |
+| `403` | Authenticated member whose role lacks the action (e.g. a Viewer creating/editing/claiming, or a Member approving). |
+| `404` | Item missing, item belongs to a non-member team, or the `:id` is malformed (fail-closed). Also a Lead/Admin of a *different* team attempting to approve. |
+| `409` | A conflict, with a stable `code`: `STALE_VERSION`, `ALREADY_ASSIGNED`, `NOT_CLAIMABLE`, `INVALID_TRANSITION`, or `IDEMPOTENCY_KEY_REUSED`. |
+| `413` | Request body exceeds the JSON parser limit (`Payload too large`). |
 
-### Phase 4 scope notes
+A body that cannot be parsed as JSON is rejected with `400 { "error": "Invalid request" }`; an over-large body with `413`. These are client errors and are **never** reported as `500` (Phase 6 fix — body-parser failures previously fell through to the generic server-error handler).
 
-- **No activity/audit events are written yet.** Recording `ITEM_CREATED` and field-change events atomically with the mutation is Phase 5. The route → service → repository layering already isolates where the transactional write will go.
-- **No optimistic concurrency yet.** `version` is read and returned but never incremented or checked — `PATCH` is last-write-wins in Phase 4. `repository.updateWorkItem` is the single extension point for Phase 5's conditional `WHERE id = ? AND version = ?` returning `409`.
-- The claim endpoint, status-transition endpoint, comments, activity history, and idempotency handling are **out of Phase 4 scope**.
+Conflict responses include a machine-readable `code` alongside the human-readable `error`:
+
+```json
+{ "error": "Work item was modified by another request", "code": "STALE_VERSION" }
+```
+
+### Phase 5 scope notes and known limitations
+
+- **Transactional guarantee.** Item mutation, version increment, activity event, outbox job, and idempotency record are committed on one connection in one transaction. There is no partial commit.
+- **No outbox worker / notification delivery.** Jobs are enqueued only. This is a deliberate deferral, not a correctness gap in the mutation path.
+- **No idempotency purge job.** `expires_at` is a retention hint; cleanup is future work.
+- **Claimability** is defined as `OPEN` or `IN_PROGRESS` over the existing status model (no new statuses); `AWAITING_APPROVAL`/`RESOLVED`/`CLOSED` are not claimable.
+- **`ITEM_UPDATED` enum value** was added by additive migration `0001_yummy_the_captain.sql` (`ALTER TYPE ... ADD VALUE`) so a title/description/type/dueAt change has an accurate event type. No historical audit rows were rewritten.
+- **Comments and activity-history read endpoints** remain out of scope (the `comments`/`activity_events` tables exist; only writes are implemented).
 - The existing `work_items` indexes (`wi_team_status_updated_idx`, `wi_team_priority_status_updated_idx`, `wi_assignee_status_updated_idx`, plus the single-column indexes) already cover the team-scoped filter/sort access patterns; **no new index was required**.
+
+## Phase 6 Verification (Integration, Security, Regression)
+
+Phase 6 audited Phases 1–5 against the running application and the live Neon database (not mocks), then fixed genuine defects and added regression coverage. Full results are in the Phase 6 completion report; the summary:
+
+- **Defects found and fixed** (minimal, in-design changes):
+  1. A **malformed JSON body returned `500`** instead of `400`. The central error handler only recognised `ApiError`, so body-parser failures fell through to the generic server-error branch. Fixed in `src/app.ts` by mapping a middleware error that carries its own 4xx status (malformed JSON → `400`, oversized body → `413`) to that status with a generic, non-leaky message.
+  2. An **out-of-range `page` returned `500`**. `page` had no upper bound, so a huge value produced an `OFFSET` such as `2e+21` that PostgreSQL rejects (`22P02 invalid input syntax for type bigint`). Fixed in `src/items/validation.ts` by capping `page` at `Number.MAX_SAFE_INTEGER` (which keeps `page × pageSize` within a bigint), rejecting absurd values with `400` rather than failing at the database.
+- **Verification (all executed against real PostgreSQL, all passing):** authentication boundaries (missing/malformed/expired/forged tokens → `401`); login non-disclosure; response hygiene (no SQL, stack traces, or secrets in error bodies); live membership revocation and role promotion/demotion honoured on the next request; cross-team isolation across every mutation endpoint (`404`); the pagination contract incl. the preserved `pageSize > 100 → 400` rule; `PATCH`/create input validation; idempotency guards (over-long key rejected, validation failures not cached and key not consumed); and the live migration state (the `ITEM_UPDATED` enum value is applied and the two migrations are recorded).
+- **Known limitation confirmed, not fixed here:** there is **no comments endpoint**, so the checklist's "cannot comment on another team's item" case has no matching route to exercise; item-level cross-team isolation is instead verified against every existing mutation endpoint. See the Phase 6 report.
 
 ## Critical Testing Requirements
 
-The following behaviors must be verified with real PostgreSQL integration tests:
-1. **Concurrent claim** - Exactly one succeeds; loser gets 409
-2. **Stale update** - Rejected with 409; newer data intact
-3. **Idempotency** - Duplicate requests produce one logical operation
-4. **Workflow enforcement** - Invalid transitions/unauthorized approvals fail
-5. **Resource authorization** - Cross-team access denied
-6. **Audit atomicity** - Failed activity insert rolls back mutation
+The following behaviors are covered by real PostgreSQL integration tests in `src/items/mutations.integration.test.ts` and `src/verification.integration.test.ts` (run with `npm run test:run` in `backend/`). Concurrency cases use genuinely overlapping requests, not sequential calls:
+
+1. **Concurrent claim** — exactly one succeeds; the loser gets `409 ALREADY_ASSIGNED` and writes no audit/outbox rows.
+2. **Stale update** — rejected with `409 STALE_VERSION`; the stored row, activity history, and outbox are untouched.
+3. **Idempotency** — duplicate and concurrent duplicate requests produce one logical operation; key reuse with a different payload is `409 IDEMPOTENCY_KEY_REUSED`.
+4. **Workflow enforcement** — invalid transitions and unauthorized approvals fail; only the item's own-team Lead/Admin can approve.
+5. **Resource authorization** — cross-team access is denied (`404`); a role held in another team grants nothing.
+6. **Audit atomicity** — a failing activity/outbox insert rolls back the item mutation in the same transaction.
 
 ## Known Limitations (To Be Documented)
 
@@ -358,7 +439,8 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 - Reopening Closed items is out of scope
 - No Redis, dedicated search engine, read replicas, or partitioning in initial build
 - WebSockets, SSO, email delivery, file attachments are not part of initial implementation
-- Transactional outbox worker is conditional (P1) and may be minimal/skipped if timeline constrained
+- Transactional outbox **insertion** is implemented (jobs are written in the same transaction as the mutation); the outbox **worker** that would deliver/process jobs is not implemented in Phase 5.
+- Idempotency records have no automated purge yet (`expires_at` is a retention hint).
 
 ## Submission Information
 
@@ -366,8 +448,11 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 - **Target Submission:** Monday, 19 October 2026, 9:30 AM (30-minute buffer)
 - **Repository Access:** Public repository access (to be confirmed at submission)
 
-### Fresh-Clone Verification (Planned)
-Fresh-clone verification steps will be documented in Phase 9 to ensure reproducible setup from a clean checkout.
+### Fresh-Clone / Setup Reproducibility (verified in Phase 6)
+
+- **Migrations:** the local Drizzle journal (`src/db/migrations/meta/_journal.json`, 2 entries) matches the live database: `drizzle.__drizzle_migrations` holds exactly 2 applied migrations whose recorded timestamps equal the journal's `when` values, and the additive `ITEM_UPDATED` enum value is present in `activity_event_type` with all prior values preserved. Local and remote migration state agree — no discrepancy and no history rewrite.
+- **Seed:** `npm run seed` is idempotent (deterministic UUIDs + `onConflictDoUpdate`, no deletes). Two consecutive runs produced identical totals (`users: 10`, `work_items: 2500`, plus `teams: 4`, `memberships: 14`, `comments: 200`, `activity_events: 600`) with no duplicate rows.
+- **Checks:** backend typecheck, frontend typecheck, and the backend production build all completed with exit code `0`; the full backend suite (unit + integration) passed. Lint is not configured (`npm run lint` is an explicit stub in both packages), and there are no frontend test files.
 
 ## License
 

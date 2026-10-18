@@ -28,6 +28,11 @@ export const activityEventTypeEnum = pgEnum("activity_event_type", [
   "ASSIGNEE_CHANGED",
   "PRIORITY_CHANGED",
   "COMMENT_ADDED",
+  // Added in Phase 5 (additive migration 0001) so a work-item field update
+  // (title/description/type/dueAt) has an accurate event type alongside the
+  // existing priority/assignee-specific types. Appended last so the schema
+  // order matches `ALTER TYPE ... ADD VALUE`, which appends.
+  "ITEM_UPDATED",
 ]);
 
 export const idempotencyStateEnum = pgEnum("idempotency_state", [

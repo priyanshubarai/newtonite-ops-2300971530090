@@ -259,6 +259,68 @@ The Phase 2 note deferred the "assignee belongs to the same team" invariant out 
 
 ---
 
+## Implementation Notes (Phase 5 — Critical Mutations)
+
+Implementation-level details for atomic claim, guarded workflow transitions, optimistic concurrency, idempotency, and transactional activity/outbox writes. They refine the approved Decision 3 (atomic claim + optimistic concurrency) and Decision 5 (idempotency + transactional audit/outbox) without changing either decision.
+
+### Driver transaction capability verified before writing critical mutations
+The runtime driver is `drizzle-orm/neon-serverless` over a Neon `Pool` (WebSocket). Before implementing any critical mutation I confirmed empirically (a throwaway probe, since removed) that this driver supports interactive multi-statement transactions, rolls back on a thrown error, and executes `pg_advisory_xact_lock`. No driver change was needed and no transaction was faked.
+
+### One transaction per mutation, threaded through `TxClient`
+`db.transaction(async (tx) => ...)` wraps every mutation. The item change, version increment, activity event, outbox job, and idempotency record are all written on the same `tx`. Repository mutation functions take a `TxClient`; read functions stay on the shared `db`. Authorization reads use `db` on a separate connection because memberships are never modified inside the mutation.
+
+### The database decides the winner (conditional single-statement updates)
+Under a race, correctness comes from the database, never from a prior `SELECT`:
+- update: `UPDATE ... WHERE id = ? AND version = ?` (and `version = version + 1`)
+- claim: `UPDATE ... WHERE id = ? AND assignee_id IS NULL AND status IN (claimable)`
+- transition: `UPDATE ... WHERE id = ? AND version = ? AND status = from`
+
+A zero-row result is mapped to `404`/`409`. There is no application-level lock and no read-then-write race.
+
+### Workflow enforced by an explicit edge map
+`items/workflow.ts` defines `WORKFLOW_NEXT` (exactly one allowed successor per status), so skipping, reversing, and reopening `CLOSED` are impossible by construction. Validation order is load → authorize → assert-valid-edge, so an unauthorized caller never learns whether an edge would have been valid; and authorization's required action depends on the edge (approval edge → `approve_transition`, everything else → `edit_item`).
+
+### Stable conflict codes on the existing error shape
+`ApiError` gained an optional `code`. `409` conflicts carry a stable machine-readable code (`STALE_VERSION`, `ALREADY_ASSIGNED`, `NOT_CLAIMABLE`, `INVALID_TRANSITION`, `IDEMPOTENCY_KEY_REUSED`) alongside the established `{ error }` body, so no existing error shape changed.
+
+### Idempotency via PostgreSQL primitives, never memory
+Keys are scoped to `user:<id>:<endpoint>`. The first statement of the idempotency transaction is `pg_advisory_xact_lock(hashtext(scope:key))`, which serializes same-key requests for the life of the transaction and releases on commit/rollback (so it works across processes). The `(scope, key)` unique index is the database-enforced backstop. A request is marked `COMPLETED` only after the business work commits; any failure rolls the record back together with the mutation, so failures are never cached and never consume the key.
+
+### Additive enum migration for `ITEM_UPDATED`
+The `activity_event_type` enum had no generic field-update value, but the phase requires recording work-item field updates. The smallest justified change was `ALTER TYPE "public"."activity_event_type" ADD VALUE 'ITEM_UPDATED'` (migration `0001_yummy_the_captain.sql`) — additive, non-destructive, and it never touches historical audit rows.
+
+### Outbox conventions defined minimally
+There was no pre-existing job format, so `items/outbox.ts` fixes one: a stable `job_type` per action (`work_item.created`/`updated`/`claimed`/`transitioned`) and a payload of `{ workItemId, teamId, actorId, status, version }`. Jobs are inserted in the mutation transaction. There is no worker in this phase.
+
+### Test timeouts raised for remote-Neon integration
+`vitest.config.ts` sets `testTimeout: 30000` / `hookTimeout: 60000` because three integration suites share one remote Neon database over WebSockets and the defaults were too tight for fixture setup.
+
+### Known limitations (documented, not hidden)
+- No outbox worker / delivery (insertion only).
+- No idempotency purge (`expires_at` is a retention hint, 24h).
+- Comments and activity-history read endpoints remain out of scope.
+- Claimable = `OPEN`/`IN_PROGRESS`, an interpretation over the existing status model (no new statuses).
+
+---
+
+## Implementation Notes (Phase 6 — Integration, Security, Regression Verification)
+
+Phase 6 audited the Phase 1–5 implementation against the running application and the live Neon database, fixed two genuine defects with minimal, in-design changes, and added a focused regression/verification suite (`backend/src/verification.integration.test.ts`). No decision above changed, and no validation/authorization/type-safety was weakened to make checks pass.
+
+### Defect 1 — malformed/oversized request bodies were reported as 500
+The central error handler in `app.ts` only recognised `ApiError`, so an Express body-parser failure (which throws an error carrying its own 4xx `status`) fell through to the generic `500` branch. A malformed JSON body therefore returned `500` instead of `400`. Fix: a small `clientErrorStatus` helper maps a non-`ApiError` with an integer 4xx status to that status with a generic, non-leaky message (`Invalid request` for `400`, `Payload too large` for `413`, `Unsupported media type` for `415`). Genuine unexpected errors still return a generic `500`.
+
+### Defect 2 — an out-of-range `page` overflowed the SQL OFFSET and returned 500
+`listItemsQuerySchema` accepted any integer `page` ≥ 1. A huge value (e.g. `1e20`) produced an `OFFSET` such as `2e+21`, which PostgreSQL rejects (`22P02 invalid input syntax for type bigint`), surfacing as a `500`. Fix: `page` is capped at `Number.MAX_SAFE_INTEGER`, which keeps `page × pageSize` (≤ `MaxSafeInteger × 100`) within PostgreSQL's `bigint`, so absurd values are now a `400`. The approved `pageSize` contract (default 20, max 100, over-cap → `400`) was preserved unchanged.
+
+### What Phase 6 verified against real PostgreSQL
+Authentication boundaries (missing/malformed/expired/forged tokens → `401` on every items endpoint); generic login failures (no account-existence disclosure); response hygiene (no SQL, stack traces, or secrets in error bodies); live membership revocation and role promotion/demotion honoured on the next request through the real API; cross-team isolation across every mutation endpoint (`404`, fail-closed); the pagination contract; `POST`/`PATCH` input validation; idempotency guards (over-long key rejected with no record, validation failure not cached and key not consumed); and live migration state (the additive `ITEM_UPDATED` enum value is applied and both migrations are recorded, matching the local journal). Concurrency, workflow, and transactional-atomicity guarantees were already covered by the Phase 5 suite and re-run green.
+
+### Coverage gap confirmed, not invented
+The Phase 6 brief lists "comment on another team's item" as an isolation case, but there is **no comments endpoint** (comments were excluded in earlier phases), so there is no route to exercise. Item-level cross-team isolation is verified against every existing mutation endpoint instead. This is recorded as a scope note rather than a new endpoint.
+
+---
+
 ## Summary
 
 All five decisions are **final** for the initial implementation:
