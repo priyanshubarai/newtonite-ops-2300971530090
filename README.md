@@ -129,28 +129,28 @@ npm run db:seed
 ```
 
 ### Running the Application (Planned)
+### Running the Application
 ```bash
 # Start backend (dev)
 cd backend && npm run dev
-
 # Start frontend (dev)
 cd frontend && npm run dev
 ```
-
+cd frontend && npm run dev
 ### Testing (Planned)
-```bash
+### Testing
 # Run all tests
-npm run test
-
+# Run all tests
+cd backend && npm run test
 # Run with coverage
 npm run test:coverage
-
-# Run integration tests (requires PostgreSQL)
-npm run test:integration
-```
-
-*Exact script names will be determined during Phase 1 implementation.*
-
+# Type checking
+cd backend && npx tsc --noEmit
+cd frontend && npx tsc --noEmit
+cd backend && npx tsc --noEmit
+# Database (Drizzle)
+cd backend && npm run db:generate
+cd backend && npm run db:migrate
 ## Critical Testing Requirements
 
 The following behaviors must be verified with real PostgreSQL integration tests:
