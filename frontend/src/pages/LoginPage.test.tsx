@@ -56,6 +56,101 @@ describe("LoginPage", () => {
     expect(getToken()).toBeNull();
   });
 
+  it("shows a network error message when the server cannot be reached", async () => {
+    const mock = installFetchMock();
+    mockSession(mock);
+    // Simulate a transport failure by making the handler reject
+    mock.on("POST", "/auth/login", () => Promise.reject(new TypeError("Failed to fetch")));
+    const user = userEvent.setup();
+
+    renderApp({ route: "/login" });
+    await user.type(screen.getByLabelText(/email/i), TEST_USER.email);
+    await user.type(screen.getByLabelText(/password/i), "any-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("We couldn't reach the server. Check your connection and try again.");
+    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    expect(getToken()).toBeNull();
+  });
+
+  it("shows a server error message for non-401 server failures", async () => {
+    const mock = installFetchMock();
+    mockSession(mock);
+    mock.on("POST", "/auth/login", () => ({
+      status: 500,
+      body: { error: "Internal server error" },
+    }));
+    const user = userEvent.setup();
+
+    renderApp({ route: "/login" });
+    await user.type(screen.getByLabelText(/email/i), TEST_USER.email);
+    await user.type(screen.getByLabelText(/password/i), "any-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Internal server error");
+    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    expect(getToken()).toBeNull();
+  });
+
+  it("returns to the originally requested page after successful login", async () => {
+    const mock = installFetchMock();
+    mockSession(mock);
+    mockItemList(mock, [makeItem()]);
+    mock.on("POST", "/auth/login", () => ({
+      status: 200,
+      body: { token: "session-token", tokenType: "Bearer", user: TEST_USER },
+    }));
+    const user = userEvent.setup();
+
+    // User tries to access /items, gets redirected to /login with state
+    renderApp({
+      route: "/login",
+      state: { from: "/items" },
+    });
+    await user.type(screen.getByLabelText(/email/i), TEST_USER.email);
+    await user.type(screen.getByLabelText(/password/i), "correct-horse-battery");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
+  });
+
+  it("prevents duplicate submissions while a request is in flight", async () => {
+    const mock = installFetchMock();
+    mockSession(mock);
+    mockItemList(mock, []);
+    let resolveLogin: (value: { status: number; body: unknown }) => void = () => {};
+    const loginPromise = new Promise<{ status: number; body: unknown }>((resolve) => {
+      resolveLogin = resolve;
+    });
+    mock.on("POST", "/auth/login", () => loginPromise);
+    const user = userEvent.setup();
+
+    renderApp({ route: "/login" });
+    await user.type(screen.getByLabelText(/email/i), TEST_USER.email);
+    await user.type(screen.getByLabelText(/password/i), "correct-horse-battery");
+
+    const submitButton = screen.getByRole("button", { name: /sign in/i });
+    await user.click(submitButton);
+
+    // Button should be disabled and show loading text
+    expect(submitButton).toBeDisabled();
+    expect(submitButton).toHaveTextContent("Signing in…");
+
+    // Try to click again - should not trigger another request
+    await user.click(submitButton);
+
+    // Resolve the first request
+    resolveLogin({ status: 200, body: { token: "session-token", tokenType: "Bearer", user: TEST_USER } });
+
+    await waitFor(() => {
+      expect(mock.requestsFor("POST", "/auth/login")).toHaveLength(1);
+    });
+
+    expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
+  });
+
   it("stores the token and loads the dashboard on success", async () => {
     const mock = installFetchMock();
     mockSession(mock);

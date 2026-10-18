@@ -5,9 +5,46 @@ import { ROLE_LABELS } from "../lib/constants";
 /**
  * Authenticated application shell: skip link, header, primary navigation, and
  * the signed-in identity with a client-side sign-out action.
+ *
+ * Navigation placeholders for future sections are included but disabled with
+ * aria-disabled and a tooltip, per the UI plan. They are not clickable until
+ * the corresponding backend endpoints and pages exist.
  */
 export function AppShell() {
   const { user, memberships, signOut } = useAuth();
+
+  const navItems: Array<{
+    to: string;
+    label: string;
+    disabled: boolean;
+    description?: string;
+  }> = [
+    { to: "/items", label: "Work items", disabled: false },
+    {
+      to: "/overview",
+      label: "Overview",
+      disabled: true,
+      description: "Operational dashboard (not yet implemented)",
+    },
+    {
+      to: "/assigned",
+      label: "Assigned to me",
+      disabled: true,
+      description: "Items assigned to you (not yet implemented)",
+    },
+    {
+      to: "/attention",
+      label: "Needs attention",
+      disabled: true,
+      description: "Urgent, unassigned, or awaiting-approval items (not yet implemented)",
+    },
+    {
+      to: "/teams",
+      label: "Teams",
+      disabled: true,
+      description: "Team selection and context (not yet implemented)",
+    },
+  ];
 
   return (
     <div className="app-shell">
@@ -15,18 +52,40 @@ export function AppShell() {
         Skip to main content
       </a>
       <header className="app-header">
-        <div className="app-header__inner">
+        <div className="app-header__inner" data-testid="app-header-inner">
           <Link to="/items" className="app-header__brand">
             Newtonite <span className="app-header__brand-sub">Operations</span>
           </Link>
 
           <nav className="app-nav" aria-label="Primary">
-            <NavLink
-              to="/items"
-              className={({ isActive }) => (isActive ? "app-nav__link app-nav__link--active" : "app-nav__link")}
-            >
-              Work items
-            </NavLink>
+            {navItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  [
+                    "app-nav__link",
+                    isActive && !item.disabled && "app-nav__link--active",
+                    item.disabled && "app-nav__link--disabled",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                }
+                aria-disabled={item.disabled}
+                tabIndex={item.disabled ? -1 : undefined}
+                onClick={(e) => {
+                  if (item.disabled) e.preventDefault();
+                }}
+                title={item.description}
+              >
+                {item.label}
+                {item.disabled && (
+                  <span className="app-nav__badge" aria-hidden="true">
+                    Soon
+                  </span>
+                )}
+              </NavLink>
+            ))}
           </nav>
 
           <div className="app-header__user">

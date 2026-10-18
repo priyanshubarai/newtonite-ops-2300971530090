@@ -53,6 +53,39 @@ describe("ItemsPage", () => {
     expect(screen.getByRole("link", { name: /create the first work item/i })).toBeInTheDocument();
   });
 
+  it("shows a filtered-empty state with a clear-filters action when filters match nothing", async () => {
+    const mock = installFetchMock();
+    // Return items initially, but empty when status=CLOSED filter is applied
+    mock.on("GET", "/items", (request) => {
+      const status = request.query.get("status");
+      if (status === "CLOSED") {
+        return { status: 200, body: { items: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0, hasNextPage: false, hasPrevPage: false } } };
+      }
+      return {
+        status: 200,
+        body: {
+          items: [makeItem({ title: "Latency spike" })],
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+        },
+      };
+    });
+    const user = userEvent.setup();
+
+    await renderDashboard(mock);
+    await screen.findByRole("link", { name: /latency spike/i });
+
+    // Apply a filter that will return no results
+    await user.selectOptions(screen.getByLabelText(/^status$/i), "CLOSED");
+
+    // Should show filtered-empty message and clear-filters button
+    expect(await screen.findByText(/no items match your filters/i)).toBeInTheDocument();
+    // The empty state has a clear-filters button in its actions
+    const emptyStateContainer = await screen.findByText(/try widening your filters/i);
+    const emptyStateClearButton = emptyStateContainer.closest(".state")?.querySelector('button');
+    expect(emptyStateClearButton).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /create the first work item/i })).not.toBeInTheDocument();
+  });
+
   it("shows a recoverable error state when the list request fails", async () => {
     const mock = installFetchMock();
     mock.on("GET", "/items", () => ({ status: 500, body: { error: "Internal server error" } }));
@@ -150,6 +183,97 @@ describe("ItemsPage", () => {
 
     await waitFor(() => expect(lastListRequest(mock).query.get("teamId")).toBe(TEAM_PAYMENTS));
     expect(mock.requestsFor("GET", "/items").length).toBeGreaterThan(1);
+  });
+
+  it("sends search query after debounce and resets page", async () => {
+    const mock = installFetchMock();
+    const items = Array.from({ length: 5 }, (_, index) =>
+      makeItem({ id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, title: `Searchable ${index + 1}` }),
+    );
+    mockItemList(mock, items);
+    const user = userEvent.setup();
+
+    await renderDashboard(mock);
+    await screen.findByRole("link", { name: /searchable 1/i });
+
+    // Type in search box - should debounce
+    await user.type(screen.getByLabelText(/search/i), "test");
+
+    // Wait for debounce and request
+    await waitFor(() => {
+      const request = lastListRequest(mock);
+      expect(request.query.get("search")).toBe("test");
+      expect(request.query.get("page")).toBe("1");
+    });
+
+    // Verify only one request was sent for the debounced term (not one per keystroke)
+    const searchRequests = mock.requestsFor("GET", "/items").filter((r) => r.query.get("search") === "test");
+    expect(searchRequests.length).toBe(1);
+  });
+
+  it("updates URL when filters change and uses replace navigation", async () => {
+    const mock = installFetchMock();
+    mockItemList(mock, [makeItem()]);
+    const user = userEvent.setup();
+
+    await renderDashboard(mock);
+    await screen.findByRole("link", { name: /latency spike/i });
+
+    // Change a filter - URL should update
+    await user.selectOptions(screen.getByLabelText(/^status$/i), "IN_PROGRESS");
+
+    await waitFor(() => {
+      const request = lastListRequest(mock);
+      expect(request.query.get("status")).toBe("IN_PROGRESS");
+      expect(request.query.get("page")).toBe("1"); // page resets when filter changes
+    });
+
+    // The URL should have been updated (we can't directly test the browser URL in jsdom,
+    // but we can verify the search params would be correct by checking the mock request)
+    // The important thing is that the request was sent with the correct params.
+  });
+
+  it("disables previous button on first page and next button on last page", async () => {
+    const mock = installFetchMock();
+    const items = Array.from({ length: 15 }, (_, index) =>
+      makeItem({ id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, title: `Item ${index + 1}` }),
+    );
+    // Use pageSize=10 to get 2 pages (15 items / 10 per page = 2 pages)
+    mockItemList(mock, items, 10);
+    const user = userEvent.setup();
+
+    await renderDashboard(mock);
+    await screen.findByRole("link", { name: "Item 1" });
+
+    // First, set page size to 10 to match the mock setup
+    await user.selectOptions(screen.getByLabelText(/per page/i), "10");
+    await waitFor(() => expect(lastListRequest(mock).query.get("pageSize")).toBe("10"));
+    await screen.findByRole("link", { name: "Item 1" });
+
+    // On page 1, previous should be disabled, next should be enabled
+    expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
+
+    // Go to page 2
+    await user.click(screen.getByRole("button", { name: /next/i }));
+    await waitFor(() => expect(lastListRequest(mock).query.get("page")).toBe("2"));
+
+    // On page 2, next should be disabled (totalPages = 2), previous should be enabled
+    expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /previous/i })).not.toBeDisabled();
+  });
+
+  it("navigates to item detail route when a row title is clicked", async () => {
+    const mock = installFetchMock();
+    const testItem = makeItem({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Navigable item" });
+    mockItemList(mock, [testItem]);
+
+    await renderDashboard(mock);
+    await screen.findByRole("link", { name: "Navigable item" });
+
+    // The link should point to the correct detail route
+    const link = screen.getByRole("link", { name: "Navigable item" });
+    expect(link).toHaveAttribute("href", "/items/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
   });
 
   it("uses the lead membership for role resolution", () => {

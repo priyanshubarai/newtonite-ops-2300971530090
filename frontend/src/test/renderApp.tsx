@@ -29,11 +29,12 @@ export function createTestQueryClient(): QueryClient {
 
 export function renderWithProviders(
   ui: ReactElement,
-  { route = "/" }: { route?: string } = {},
+  { route = "/", state, initialEntries }: { route?: string; state?: unknown; initialEntries?: string[] } = {},
 ): RenderResult & { queryClient: QueryClient } {
   const queryClient = createTestQueryClient();
+  const entries = initialEntries ?? (state ? [{ pathname: route, state }] : [route]);
   const result = render(
-    <MemoryRouter initialEntries={[route]}>
+    <MemoryRouter initialEntries={entries}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>{ui}</AuthProvider>
       </QueryClientProvider>
@@ -42,8 +43,10 @@ export function renderWithProviders(
   return { ...result, queryClient };
 }
 
-export function renderApp({ route = "/" }: { route?: string } = {}) {
-  return renderWithProviders(<App />, { route });
+export function renderApp(
+  { route = "/", state, initialEntries }: { route?: string; state?: unknown; initialEntries?: string[] } = {},
+) {
+  return renderWithProviders(<App />, { route, state, initialEntries });
 }
 
 export function withProviders(node: ReactNode, route = "/"): ReactElement {

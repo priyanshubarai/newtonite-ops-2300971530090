@@ -3,6 +3,8 @@ import type {
   WorkItemType,
   WorkPriority,
   WorkStatus,
+  SortField,
+  SortDirection,
 } from "../api/types";
 
 /** Human-readable labels for the API's enum values. */
@@ -67,3 +69,9 @@ export const CLAIMABLE_STATUSES: readonly WorkStatus[] = ["OPEN", "IN_PROGRESS"]
 /** Page-size options offered in the UI. All are <= the backend maximum of 100. */
 export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 export const DEFAULT_PAGE_SIZE = 20;
+
+/** Supported sort fields, mirroring the backend validation allowlist. */
+export const SORT_FIELDS: readonly SortField[] = ["createdAt", "updatedAt", "priority", "dueAt"] as const;
+
+/** Supported sort directions, mirroring the backend validation allowlist. */
+export const SORT_DIRECTIONS: readonly SortDirection[] = ["asc", "desc"] as const;

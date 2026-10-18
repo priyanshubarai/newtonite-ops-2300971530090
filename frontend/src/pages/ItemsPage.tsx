@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listItems } from "../api/items";
 import type {
@@ -19,6 +19,8 @@ import {
   PAGE_SIZE_OPTIONS,
   PRIORITY_LABELS,
   STATUS_LABELS,
+  SORT_FIELDS,
+  SORT_DIRECTIONS,
 } from "../lib/constants";
 import { formatDate, formatDateTime, isOverdue, isUuid, shortId } from "../lib/format";
 import { teamsWhereUserCanCreate } from "../lib/permissions";
@@ -50,6 +52,25 @@ const INITIAL_FILTERS: AppliedFilters = {
 };
 
 /**
+ * Parse a sort:string like "updatedAt:desc" into { sort, order }.
+ * Falls back to defaults if the format is invalid.
+ */
+function parseSortValue(value: string | null): { sort: SortField; order: SortDirection } {
+  if (!value) return { sort: "updatedAt", order: "desc" };
+  const [sort, order] = value.split(":") as [SortField, SortDirection];
+  const validSort = SORT_FIELDS.includes(sort) ? sort : "updatedAt";
+  const validOrder = SORT_DIRECTIONS.includes(order) ? order : "desc";
+  return { sort: validSort, order: validOrder };
+}
+
+/**
+ * Build a sort string from sort and order.
+ */
+function buildSortValue(sort: SortField, order: SortDirection): string {
+  return `${sort}:${order}`;
+}
+
+/**
  * Operations dashboard: a server-filtered, server-paginated list of the work
  * items the signed-in user is allowed to see.
  *
@@ -57,14 +78,57 @@ const INITIAL_FILTERS: AppliedFilters = {
  * downloads the full collection. Changing any filter resets to page 1, and the
  * free-text filters are debounced so a burst of keystrokes produces a single
  * request rather than one per character.
+ *
+ * Queue state is synchronized with the URL query string so that filters,
+ * search, sort, and pagination are shareable and survive refresh.
  */
 export function ItemsPage() {
   const { memberships, user } = useAuth();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
+  // Initialize state from URL search params on first render.
+  // Use location.search as a fallback for environments where useSearchParams
+  // doesn't parse initialEntries correctly (e.g., MemoryRouter in tests).
+  const [initialized, setInitialized] = useState(false);
   const [text, setText] = useState({ search: "", assigneeId: "" });
+  const [applied, setApplied] = useState<AppliedFilters>(INITIAL_FILTERS);
+
+  useEffect(() => {
+    if (initialized) return;
+    // Prefer useSearchParams, but fall back to parsing location.search directly
+    // for test environments where initialEntries query strings aren't parsed.
+    const params = searchParams.toString() ? searchParams : new URLSearchParams(location.search);
+    const teamId = params.get("teamId") ?? "";
+    const status = params.get("status") ?? "";
+    const priority = params.get("priority") ?? "";
+    const assigneeId = params.get("assigneeId") ?? "";
+    const search = params.get("search") ?? "";
+    const page = Math.max(1, Number(params.get("page")) || 1);
+    const pageSize = Math.max(1, Math.min(100, Number(params.get("pageSize")) || DEFAULT_PAGE_SIZE));
+    const { sort, order } = parseSortValue(params.get("sort"));
+
+    // Only update if URL has non-default values to avoid unnecessary re-renders.
+    const hasUrlState = teamId || status || priority || assigneeId || search || page !== 1 || pageSize !== DEFAULT_PAGE_SIZE || sort !== "updatedAt" || order !== "desc";
+    if (hasUrlState) {
+      setText({ search, assigneeId });
+      setApplied({
+        teamId,
+        status: status as WorkStatus | "",
+        priority: priority as WorkPriority | "",
+        assigneeId,
+        search,
+        sort,
+        order,
+        pageSize,
+        page,
+      });
+    }
+    setInitialized(true);
+  }, [searchParams, location.search, initialized]);
+
   const debouncedSearch = useDebouncedValue(text.search, 300);
   const debouncedAssignee = useDebouncedValue(text.assigneeId, 300);
-  const [applied, setApplied] = useState<AppliedFilters>(INITIAL_FILTERS);
 
   // Fold debounced text into the applied filters atomically, resetting the page.
   // Doing it here (rather than reading the debounced values directly) keeps the
@@ -77,6 +141,24 @@ export function ItemsPage() {
       return { ...prev, search: nextSearch, assigneeId: nextAssignee, page: 1 };
     });
   }, [debouncedSearch, debouncedAssignee]);
+
+  // Synchronize applied filters to URL search params.
+  // We use `replace` to avoid polluting history with every keystroke/filter change.
+  useEffect(() => {
+    if (!initialized) return;
+    const nextParams = new URLSearchParams();
+    if (applied.teamId) nextParams.set("teamId", applied.teamId);
+    if (applied.status) nextParams.set("status", applied.status);
+    if (applied.priority) nextParams.set("priority", applied.priority);
+    if (applied.assigneeId) nextParams.set("assigneeId", applied.assigneeId);
+    if (applied.search) nextParams.set("search", applied.search);
+    if (applied.page !== 1) nextParams.set("page", String(applied.page));
+    if (applied.pageSize !== DEFAULT_PAGE_SIZE) nextParams.set("pageSize", String(applied.pageSize));
+    if (applied.sort !== "updatedAt" || applied.order !== "desc") {
+      nextParams.set("sort", buildSortValue(applied.sort, applied.order));
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [applied, initialized, setSearchParams]);
 
   function updateFilter<K extends keyof AppliedFilters>(key: K, value: AppliedFilters[K]) {
     setApplied((prev) => ({ ...prev, [key]: value, page: 1 }));
