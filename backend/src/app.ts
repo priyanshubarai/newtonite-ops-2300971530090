@@ -1,14 +1,31 @@
 import express from "express";
+import cors from "cors";
 import { healthCheck } from "./health/health.js";
 import { authRouter } from "./auth/routes.js";
 import { itemsRouter } from "./items/routes.js";
 import { ApiError } from "./common/errors.js";
+import { getCorsOrigins, validateCorsConfig } from "./config/env.js";
 
 /**
  * Application construction, separated from `listen` so tests (Supertest) can
  * import the fully-wired app without binding a port.
  */
 const app = express();
+
+// Validate CORS configuration at startup (fails fast in production if misconfigured)
+validateCorsConfig();
+
+// CORS middleware - configured from environment variable
+const corsOrigins = getCorsOrigins();
+app.use(
+  cors({
+    origin: corsOrigins,
+    credentials: true, // Allow cookies/auth headers
+    methods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+    maxAge: 86400, // 24 hours
+  })
+);
 
 app.use(express.json());
 

@@ -20,6 +20,13 @@ const envSchema = z.object({
   // Auth token lifetime in seconds (default 15 minutes). Kept short because
   // memberships/roles are loaded from the database on every request.
   JWT_EXPIRES_IN: z.coerce.number().int().positive().default(900),
+  // CORS configuration. In production, CORS_ORIGIN must be explicitly set to the
+  // deployed frontend origin (e.g. "https://app.example.com"). Multiple origins
+  // can be provided as a comma-separated list. In development, defaults to
+  // "http://localhost:5173" to match the Vite dev server. The value is parsed
+  // and normalized at startup; malformed or missing production configuration
+  // will fail fast with a clear error.
+  CORS_ORIGIN: z.string().optional(),
   // Outbox worker tuning (Phase 8). All optional - the worker always runs with
   // sensible defaults, so running it requires no extra configuration. The
   // worker reads these through `resolveWorkerConfig`; the HTTP API ignores them.
@@ -35,3 +42,44 @@ const envSchema = z.object({
 
 // Never echo the connection string in errors; only report the missing/invalid field.
 export const env = envSchema.parse(process.env);
+
+// Parse and normalize CORS origins
+export function getCorsOrigins(): string[] {
+  const raw = env.CORS_ORIGIN?.trim();
+  if (!raw) {
+    // Development default - Vite dev server
+    return ["http://localhost:5173"];
+  }
+
+  return raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0)
+    .map((o) => {
+      // Normalize: remove trailing slashes, ensure protocol
+      try {
+        const url = new URL(o);
+        // Remove trailing slash from origin
+        return `${url.protocol}//${url.host}`;
+      } catch {
+        // If it's not a valid URL, return as-is (will be validated by cors)
+        return o.replace(/\/+$/, "");
+      }
+    });
+}
+
+// Validate CORS configuration for production
+export function validateCorsConfig(): void {
+  if (env.NODE_ENV === "production") {
+    const raw = env.CORS_ORIGIN?.trim();
+    if (!raw) {
+      throw new Error(
+        "CORS_ORIGIN is required in production. Set it to your deployed frontend origin (e.g. https://app.example.com)."
+      );
+    }
+    const origins = getCorsOrigins();
+    if (origins.length === 0) {
+      throw new Error("CORS_ORIGIN is set but no valid origins were parsed.");
+    }
+  }
+}
