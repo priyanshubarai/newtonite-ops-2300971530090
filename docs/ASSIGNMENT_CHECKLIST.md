@@ -39,19 +39,19 @@
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| UR-001 | Users can belong to multiple teams | P0 | Documented in data model | ARCHITECTURE.md | Not Started |
-| UR-002 | Each user-team membership has its own role | P0 | Documented in data model | ARCHITECTURE.md | Not Started |
-| UR-003 | Roles: Viewer, Member, Lead, Admin | P0 | All four roles listed | ARCHITECTURE.md | Not Started |
-| UR-004 | Roles are scoped to teams (not globally) | P0 | Explicitly documented | ARCHITECTURE.md | Not Started |
-| UR-005 | Seeded demo users sufficient; user registration out of scope | P0 | Documented | ARCHITECTURE.md | Not Started |
+| UR-001 | Users can belong to multiple teams | P0 | Users table + memberships with multi-team rows verified | DB check (4 multi-team users seeded) | Verified (schema + seed) |
+| UR-002 | Each user-team membership has its own role | P0 | role column on membership; no global role on users | DB schema + seed | Verified (schema + seed) |
+| UR-003 | Roles: Viewer, Member, Lead, Admin | P0 | team_role enum has all four values | DB enum verified in Neon | Verified (schema) |
+| UR-004 | Roles are scoped to teams (not globally) | P0 | role lives on membership only | DB schema | Verified (schema) |
+| UR-005 | Seeded demo users sufficient; user registration out of scope | P0 | 10 demo users seeded, hashed passwords | `npm run seed` verified | Verified (seed) |
 
 ## 5. Work Items Model
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| WI-001 | Required fields: id, title, description, type, priority, status, team_id, assignee_id, created_by, due_at, version, created_at, updated_at | P0 | Complete field list documented | ARCHITECTURE.md | Not Started |
-| WI-002 | due_at and assignee_id may be nullable | P0 | Nullability documented | ARCHITECTURE.md | Not Started |
-| WI-003 | Use PostgreSQL UUID identifiers unless existing constraint requires review | P0 | ID strategy documented | ARCHITECTURE.md | Not Started |
+| WI-001 | Required fields: id, title, description, type, priority, status, team_id, assignee_id, created_by, due_at, version, created_at, updated_at | P0 | All 13 columns present in work_items table | DB schema verified in Neon | Verified (schema) |
+| WI-002 | due_at and assignee_id may be nullable | P0 | Both columns nullable; verified by insert with nulls | DB schema verified in Neon | Verified (schema) |
+| WI-003 | Use PostgreSQL UUID identifiers unless existing constraint requires review | P0 | All PKs are uuid default gen_random_uuid() | DB schema verified in Neon | Verified (schema) |
 
 ## 6. Workflow
 
@@ -75,19 +75,19 @@
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| CH-001 | Support comments and append-only activity history | P0 | Features documented | ARCHITECTURE.md | Not Started |
-| CH-002 | Record: status changes, assignee changes, priority changes (minimum) | P0 | Event types documented | ARCHITECTURE.md | Not Started |
-| CH-003 | Each event includes actor, work item, event type, timestamp, before/after | P0 | Event schema documented | ARCHITECTURE.md | Not Started |
-| CH-004 | Business mutation and activity event in same PostgreSQL transaction | P0 | Transaction boundary documented | ARCHITECTURE.md | Not Started |
+| CH-001 | Support comments and append-only activity history | P0 | comments + activity_events tables created | DB schema verified in Neon | Verified (schema) |
+| CH-002 | Record: status changes, assignee changes, priority changes (minimum) | P0 | activity_event_type enum includes STATUS_CHANGED, ASSIGNEE_CHANGED, PRIORITY_CHANGED | DB enum verified; writing service deferred to Phase 5 | Verified (schema) |
+| CH-003 | Each event includes actor, work item, event type, timestamp, before/after | P0 | actor_id, work_item_id, event_type, created_at, metadata(before/after) columns | DB schema verified in Neon | Verified (schema) |
+| CH-004 | Business mutation and activity event in same PostgreSQL transaction | P0 | Requires transactional write service | Not implemented — Phase 5 scope | Not Started |
 
 ## 9. Role & Permission Matrix
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| RP-001 | Matrix as specified without additions/removals | P0 | Exact matrix documented in ARCHITECTURE.md | Compare against spec | Not Started |
-| RP-002 | All permissions team-scoped | P0 | Explicitly documented | ARCHITECTURE.md | Not Started |
-| RP-003 | Backend enforces auth, membership, resource access, action permissions | P0 | Authorization strategy documented | ARCHITECTURE.md | Not Started |
-| RP-004 | Hiding frontend controls is not an authorization mechanism | P0 | Security constraint documented | ARCHITECTURE.md | Not Started |
+| RP-001 | Matrix as specified without additions/removals | P0 | Exact matrix implemented in policy.ts and covered by tests | policy.test.ts (32 cases, table-driven) | Verified (code + tests) |
+| RP-002 | All permissions team-scoped | P0 | roleCan always resolves role for one concrete team; no global bypass | policy.ts + authorize.ts; cross-team test asserts 404 | Verified (code + tests) |
+| RP-003 | Backend enforces auth, membership, resource access, action permissions | P0 | requireAuth + requireTeamPermission middleware enforce server-side | auth.integration.test.ts against Neon | Verified (code + tests) |
+| RP-004 | Hiding frontend controls is not an authorization mechanism | P0 | Enforcement is entirely server-side; frontend not yet built | ARCHITECTURE.md + backend policy | Verified (server-side enforcement) |
 
 ## 10. Engineering Decisions (Final)
 
@@ -107,7 +107,7 @@
 | CT-002 | Stale update: rejected, newer data intact | P0 | Test requirement documented | ARCHITECTURE.md, Roadmap | Not Started |
 | CT-003 | Idempotency: duplicate requests produce one logical operation | P0 | Test requirement documented | ARCHITECTURE.md, Roadmap | Not Started |
 | CT-004 | Workflow enforcement: invalid transitions & unauthorized approval fail | P0 | Test requirement documented | ARCHITECTURE.md, Roadmap | Not Started |
-| CT-005 | Resource authorization: cross-team access denied | P0 | Test requirement documented | ARCHITECTURE.md, Roadmap | Not Started |
+| CT-005 | Resource authorization: cross-team access denied | P0 | Cross-team test asserts 404 for non-member team | auth.integration.test.ts (Team A role → 404 in Team B) | Verified (test) |
 | CT-006 | Audit atomicity: failed activity insert rolls back mutation | P0 | Test requirement documented | ARCHITECTURE.md, Roadmap | Not Started |
 | CT-007 | Real PostgreSQL for concurrency integration tests | P0 | Documented constraint | ARCHITECTURE.md | Not Started |
 | CT-008 | Vitest + Supertest | P0 | Documented | ARCHITECTURE.md | Not Started |
@@ -117,7 +117,7 @@
 
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
-| API-001 | POST /auth/login | P0 | Documented | ARCHITECTURE.md | Not Started |
+| API-001 | POST /auth/login | P0 | Implemented; generic 401 on all failures, tested | auth.integration.test.ts against Neon | Verified (endpoint + tests) |
 | API-002 | GET /me | P0 | Documented | ARCHITECTURE.md | Not Started |
 | API-003 | GET /items | P0 | Documented with filtering/search/cursor pagination | ARCHITECTURE.md | Not Started |
 | API-004 | POST /items | P0 | Documented | ARCHITECTURE.md | Not Started |
@@ -134,8 +134,8 @@
 | ID | Requirement | Priority | Acceptance Criteria | Verification Method | Current Status |
 |---|---|---|---|---|---|
 | RM-001 | Phase 1: Project foundation | P0 | Documented with all required elements | IMPLEMENTATION_ROADMAP.md | Not Started |
-| RM-002 | Phase 2: Database schema and seed data | P0 | Documented with all required elements | IMPLEMENTATION_ROADMAP.md | Not Started |
-| RM-003 | Phase 3: Authentication and authorization | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
+| RM-002 | Phase 2: Database schema and seed data | P0 | All 8 entities, migrations, seed verified against Neon | Migration + seed executed & verified | Verified (complete) |
+| RM-003 | Phase 3: Authentication and authorization | P0 | Login, /me, middleware, policy helpers, tests all implemented | Full suite run against Neon (53 tests pass) | Verified (complete) |
 | RM-004 | Phase 4: Work-item API | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-005 | Phase 5: Correctness-critical mutations | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |
 | RM-006 | Phase 6: Critical integration tests | P0 | Documented | IMPLEMENTATION_ROADMAP.md | Not Started |

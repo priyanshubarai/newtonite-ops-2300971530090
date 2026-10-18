@@ -95,7 +95,7 @@ All views support server-side search, filtering, deterministic ordering, and cur
 
 ## Current Implementation Status
 
-**Status:** Documentation phase complete. This repository currently contains specification documentation only. No application code, dependencies, or build artifacts have been implemented as per the documentation executor boundaries.
+**Status:** Backend foundation (Phase 1), database schema and seed (Phase 2), and authentication + team-scoped authorization (Phase 3) are implemented and verified. The frontend is scaffolded but product screens are not yet built.
 
 See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status of all requirements.
 
@@ -120,10 +120,14 @@ cd backend && npm install
 # Install dependencies (frontend)
 cd frontend && npm install
 
-# Configure the database connection
+# Configure the database connection and auth secret
 cp backend/.env.example backend/.env
-# Edit backend/.env and set DATABASE_URL to your Neon connection string.
-# DATABASE_URL is gitignored; never commit it.
+# Edit backend/.env and set:
+#   DATABASE_URL - your Neon connection string
+#   JWT_SECRET   - a strong random secret (>= 32 chars) used to sign auth tokens
+# Both are gitignored; never commit them.
+# Generate a JWT_SECRET with:
+#   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 ### Database Operations (against Neon)
@@ -139,32 +143,118 @@ npm run db:migrate
 
 > Drizzle Kit reads `DATABASE_URL` from `backend/.env`. The `db:push` script is **not** a substitute for the versioned migration workflow and should not be used to bypass migrations.
 
-### Seeding
-Seed scripts run against the same Neon database via `DATABASE_URL`. (Seed implementation arrives in Phase 2.)
+### Seeding (verified — Phase 2)
 
-### Running the Application (Planned)
+Seeding runs against the same Neon database via `DATABASE_URL`:
+
+```bash
+cd backend
+npm run seed
+```
+
+The seed is **repeatable**: it uses deterministic UUIDs and upserts, so re-running it does not create duplicate teams, users, memberships, work items, comments, or activity events. It seeds 4 teams, 10 users, memberships covering all four roles (with several users in multiple teams), 2,500 work items across all types/priorities/statuses (for pagination testing), plus 200 comments and 600 activity events.
+
+**Demo accounts (development-only):** each seeded user shares one password, set via `DEMO_PASSWORD` (defaults to `newtonite-demo`) during seeding. Passwords are stored as bcrypt hashes — never plaintext. *Do not reuse this password anywhere real.*
+
+**Verified Phase 2 commands:**
+```bash
+cd backend
+npx tsc --noEmit     # typecheck
+npm run db:generate  # generate migrations
+npm run db:migrate   # apply migrations to Neon
+npm run seed         # seed demo data (idempotent)
+npm run test:run     # vitest (no test files until Phase 6)
+```
+
+## Authentication & Authorization (implemented — Phase 3)
+
+### How authentication works
+
+Login issues a **short-lived, signed bearer token** (JWT, HS256) that the client sends on every protected request.
+
+- `POST /auth/login` accepts `{ email, password }`, verifies the password against the stored **bcrypt** hash, and returns `{ token, tokenType: "Bearer", user }`.
+- Tokens are signed with `JWT_SECRET` and expire after `JWT_EXPIRES_IN` seconds (default 900 = 15 minutes).
+- The token carries only the user id in its `sub` claim. **Roles and memberships are never embedded in the token** — they are loaded from PostgreSQL on every request, so a role change or membership revocation takes effect immediately without waiting for the token to expire.
+- Send the token as: `Authorization: Bearer <token>`.
+
+Every login failure — unknown email, wrong password, or a deactivated account — returns the same generic `401 { "error": "Invalid email or password" }`, so account existence is never disclosed. Malformed input returns `400`.
+
+### Endpoints added
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `POST /auth/login` | None | Exchange email + password for a bearer token. |
+| `GET /auth/me` | Required | Return the authenticated user's safe fields plus their team memberships and roles. |
+
+### Required environment variables
+
+Set in `backend/.env` (gitignored). See `backend/.env.example` for blank placeholders.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Yes | Neon PostgreSQL connection string. |
+| `JWT_SECRET` | Yes | Signing secret for auth tokens (min 32 chars). Never commit a real value. |
+| `JWT_EXPIRES_IN` | No | Token lifetime in seconds (default `900`). |
+
+### Demo login (development-only)
+
+The seed creates 10 users that all share one password. In `backend/.env`, set `DEMO_PASSWORD` (defaults to `newtonite-demo`) before running `npm run seed`. Then:
+
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"avery@newtonite.dev","password":"newtonite-demo"}'
+```
+
+*These credentials are for local development only — do not reuse them anywhere real.*
+
+### Team-scoped role model
+
+Roles are assigned **per team** via team membership; a user can hold different roles in different teams. There is no global role and no "admin everywhere" bypass — every permission check resolves the user's role for one specific team.
+
+| Operation | Viewer | Member | Lead | Admin |
+|---|---:|---:|---:|---:|
+| View team items | Yes | Yes | Yes | Yes |
+| Create / edit / claim items | No | Yes | Yes | Yes |
+| Approve workflow transitions | No | No | Yes | Yes |
+| Manage team membership | No | No | No | Yes |
+
+Authorization is enforced entirely server-side (`src/auth/policy.ts` + `src/auth/authorize.ts`). For resources tied to a team (e.g. work items), the intended flow is: authenticate → load the resource and its **real** team id from the database → resolve the caller's role for that team → check the action → proceed. A client-supplied team or role is never trusted as proof of access. A request for a team the caller does not belong to returns `404` (not `403`) to prevent cross-team enumeration.
+
+### Current auth limitations
+
+- No refresh tokens, OAuth/SSO, password reset, or account registration (out of scope for this phase).
+- No frontend login screen yet (backend only).
+- Tokens are stateless; a compromised `JWT_SECRET` requires rotating the secret. Keep it strong and private.
+
 ### Running the Application
+
 ```bash
 # Start backend (dev)
 cd backend && npm run dev
 # Start frontend (dev)
 cd frontend && npm run dev
 ```
-cd frontend && npm run dev
-### Testing (Planned)
+
 ### Testing
-# Run all tests
-# Run all tests
-cd backend && npm run test
-# Run with coverage
-npm run test:coverage
+
+```bash
+cd backend
+
+# Run all tests (Vitest). Requires DATABASE_URL + JWT_SECRET in backend/.env.
+npm run test:run
+
 # Type checking
 cd backend && npx tsc --noEmit
-cd frontend && npx tsc --noEmit
-cd backend && npx tsc --noEmit
+cd ../frontend && npx tsc --noEmit
+
 # Database (Drizzle)
-cd backend && npm run db:generate
-cd backend && npm run db:migrate
+cd ../backend && npm run db:generate
+cd ../backend && npm run db:migrate
+```
+
+> **Note on test layers:** `src/auth/policy.test.ts` is a pure unit test (no database). `src/auth/auth.integration.test.ts` runs against the configured Neon database and creates/cleans up its own throwaway fixtures — it never mutates the seeded demo dataset.
+
 ## Critical Testing Requirements
 
 The following behaviors must be verified with real PostgreSQL integration tests:

@@ -179,6 +179,54 @@ Retry-sensitive operations (e.g., network retries) can cause duplicate side effe
 
 ---
 
+## Implementation Notes (Phase 2 — Schema)
+
+These are schema-level implementation details. They do **not** change any of the five approved architectural decisions above.
+
+### Enums as PostgreSQL types
+Fixed value sets are stored as real PostgreSQL enum types rather than text + check constraints: `team_role`, `work_item_type`, `work_priority`, `work_status`, `activity_event_type`, `idempotency_state`, `outbox_status`. This gives database-level validation and type safety for role, status, priority, type, and processing-state values.
+
+### Activity before/after in one JSONB column
+Activity events store before/after values together in a single `metadata` JSONB column (e.g. `{ "before": ..., "after": ... }`) instead of separate `before_values`/`after_values` columns. This keeps the append-only record simple while preserving all required values.
+
+### Idempotency scope + key
+Idempotency records use a `scope` + `key` pair with a unique index `ir_scope_key_unique (scope, key)`. A `request_hash` column stores a fingerprint of the original request so reuse of the same key for a *different* request can be detected and rejected. `state` (`IN_PROGRESS`/`COMPLETED`/`FAILED`), `status_code`, `response_body`, and `expires_at` support safe replay and retention.
+
+### Restrictive deletion for audit integrity
+Foreign keys referenced by audit history use `ON DELETE RESTRICT` (not cascade) so users/work items with historical activity cannot be silently removed. The only exception is `work_items.assignee_id`, which is `SET NULL` — an assignee leaving does not destroy the item or its history.
+
+### Same-team assignee invariant not enforced in DB
+The "assignee must belong to the same team" invariant is **not** enforced by a database constraint (a composite FK would require restructuring team/user keys). It is deferred to the authorization/domain service in a later phase, per the assignment's allowance.
+
+### Seed determinism
+The seed uses deterministic UUIDs (SHA-1 v5-style from a fixed namespace) and upserts keyed on unique columns (email, slug, membership pair, idempotency scope+key, item id). This makes re-runs idempotent — no duplicate logical records. Passwords are hashed with bcrypt (never plaintext); the demo password is development-only and configurable via `DEMO_PASSWORD`.
+
+---
+
+## Implementation Notes (Phase 3 — Authentication & Authorization)
+
+These are implementation-level details for the auth foundation. They do **not** change any of the five approved architectural decisions above.
+
+### Short-lived signed bearer tokens (JWT, HS256)
+No auth mechanism existed in the repository, so per the assignment default I implemented short-lived signed bearer tokens using `jsonwebtoken` (HS256) with a server-side `JWT_SECRET` from the environment (min 32 chars, never committed). Trade-offs: stateless and simple to integrate on the later frontend, but a compromised secret requires rotation and there is no server-side revocation list — acceptable given the short 15-minute default expiry and that this is an internal tool.
+
+### Roles loaded from the database, not the token
+The token carries only the user id (`sub`). Memberships and roles are read fresh from PostgreSQL on every request. This is a deliberate choice over embedding roles as token claims: a role change or membership revocation takes effect on the next request instead of waiting for the token to expire. Cost: one small indexed membership lookup per authorized request, which the `user_team_unique` / `utm_user_idx` indexes serve cheaply.
+
+### Generic login failures
+Unknown email, wrong password, and deactivated account all return the identical `401 "Invalid email or password"`. A dummy bcrypt compare is performed on the unknown-email path so response timing does not distinguish "no such user" from "wrong password". No user-existence leakage.
+
+### 404 (not 403) for cross-team access
+When a caller is not a member of the target team, authorization returns `404` rather than `403`, so a caller cannot enumerate which team ids exist. `403` is reserved for a member whose role lacks the required action. Malformed team/user UUIDs fail closed as `404` before ever reaching the database.
+
+### Fail-closed policy
+`roleCan` denies any action for a missing or unrecognized role, and the authorization helper validates UUID format and re-reads the membership each time. There is no global admin bypass — authority is always scoped to one concrete team.
+
+### Reused bcrypt for password verification
+The seed already used `bcryptjs` to hash demo passwords, so login verification reuses the same library (no new dependency, consistent hash format). Plaintext is never stored, logged, or compared directly.
+
+---
+
 ## Summary
 
 All five decisions are **final** for the initial implementation:
