@@ -7,8 +7,8 @@ import { ROLE_LABELS } from "../lib/constants";
  * the signed-in identity with a client-side sign-out action.
  *
  * Navigation placeholders for future sections are included but disabled with
- * aria-disabled and a tooltip, per the UI plan. They are not clickable until
- * the corresponding backend endpoints and pages exist.
+ * aria-disabled and visually hidden text, per the UI plan. They are not clickable
+ * until the corresponding backend endpoints and pages exist.
  */
 export function AppShell() {
   const { user, memberships, signOut } = useAuth();
@@ -76,13 +76,15 @@ export function AppShell() {
                 onClick={(e) => {
                   if (item.disabled) e.preventDefault();
                 }}
-                title={item.description}
               >
                 {item.label}
                 {item.disabled && (
-                  <span className="app-nav__badge" aria-hidden="true">
-                    Soon
-                  </span>
+                  <>
+                    <span className="visually-hidden"> (not yet implemented)</span>
+                    <span className="app-nav__badge" aria-hidden="true">
+                      Soon
+                    </span>
+                  </>
                 )}
               </NavLink>
             ))}

@@ -188,7 +188,12 @@ export function ItemEditPage() {
           tone="warning"
           title="This item changed while you were editing"
           actions={
-            <button type="button" className="button" onClick={() => void handleReloadLatest()}>
+            <button
+              type="button"
+              className="button"
+              onClick={() => void handleReloadLatest()}
+              aria-label="Reload latest version of the work item"
+            >
               Reload latest version
             </button>
           }

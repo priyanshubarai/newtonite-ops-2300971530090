@@ -179,4 +179,130 @@ describe("ItemDetailPage", () => {
 
     expect(screen.queryByRole("link", { name: /^edit$/i })).not.toBeInTheDocument();
   });
+
+  it("shows a network error for claim when the server cannot be reached", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", assigneeId: null });
+    await renderDetail(mock, item);
+    // Simulate a network failure
+    mock.on("POST", `/items/${item.id}/claim`, () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /claim this item/i }));
+
+    expect(await screen.findByText(/could not reach the server/i)).toBeInTheDocument();
+    expect(screen.queryByText(/you claimed this work item/i)).not.toBeInTheDocument();
+    // No success toast should appear
+    expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a server error for claim when the server returns 500", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", assigneeId: null });
+    await renderDetail(mock, item);
+    mock.on("POST", `/items/${item.id}/claim`, () => ({
+      status: 500,
+      body: { error: "Internal server error" },
+    }));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /claim this item/i }));
+
+    expect(await screen.findByText(/internal server error/i)).toBeInTheDocument();
+    expect(screen.queryByText(/you claimed this work item/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a network error for transition when the server cannot be reached", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", version: 1 });
+    await renderDetail(mock, item, [MEMBER_MEMBERSHIP]);
+    mock.on("POST", `/items/${item.id}/transition`, () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /start progress/i }));
+
+    expect(await screen.findByText(/could not reach the server/i)).toBeInTheDocument();
+    expect(screen.queryByText(/moved to in progress/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a server error for transition when the server returns 500", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", version: 1 });
+    await renderDetail(mock, item, [MEMBER_MEMBERSHIP]);
+    mock.on("POST", `/items/${item.id}/transition`, () => ({
+      status: 500,
+      body: { error: "Internal server error" },
+    }));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /start progress/i }));
+
+    expect(await screen.findByText(/internal server error/i)).toBeInTheDocument();
+    expect(screen.queryByText(/moved to in progress/i)).not.toBeInTheDocument();
+  });
+
+  it("reuses the same idempotency key when the claim button is clicked rapidly", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", assigneeId: null });
+    const claimed = makeItem({ status: "OPEN", assigneeId: TEST_USER.id, version: 2 });
+    await renderDetail(mock, item);
+    mock.on("POST", `/items/${item.id}/claim`, () => ({ status: 200, body: claimed }));
+    const user = userEvent.setup();
+
+    const claimButton = screen.getByRole("button", { name: /claim this item/i });
+    await user.click(claimButton);
+    await user.click(claimButton); // Rapid second click
+
+    await waitFor(() => expect(mock.requestsFor("POST", `/items/${item.id}/claim`)).toHaveLength(1));
+    expect(mock.requestsFor("POST", `/items/${item.id}/claim`)[0].headers["Idempotency-Key"]).toBeTruthy();
+  });
+
+  it("reuses the same idempotency key when the transition button is clicked rapidly", async () => {
+    const mock = installFetchMock();
+    const item = makeItem({ status: "OPEN", version: 1 });
+    let resolveTransition: (value: { status: number; body: unknown }) => void = () => {};
+    const transitionPromise = new Promise<{ status: number; body: unknown }>((resolve) => {
+      resolveTransition = resolve;
+    });
+    mock.on("POST", `/items/${item.id}/transition`, () => transitionPromise);
+    const moved = makeItem({ status: "IN_PROGRESS", version: 2 });
+    await renderDetail(mock, item, [MEMBER_MEMBERSHIP]);
+    const user = userEvent.setup();
+
+    const transitionButton = screen.getByRole("button", { name: /start progress/i });
+    await user.click(transitionButton);
+    // Rapid second click before first completes
+    await user.click(transitionButton);
+
+    // Resolve the first request
+    resolveTransition({ status: 200, body: moved });
+
+    await waitFor(() => {
+      expect(mock.requestsFor("POST", `/items/${item.id}/transition`)).toHaveLength(1);
+      expect(mock.requestsFor("POST", `/items/${item.id}/transition`)[0].headers["Idempotency-Key"]).toBeTruthy();
+    });
+  });
+
+  it("handles NOT_CLAIMABLE error when item status is not claimable", async () => {
+    const mock = installFetchMock();
+    // Use OPEN status which is claimable, but backend returns NOT_CLAIMABLE
+    const item = makeItem({ status: "OPEN", assigneeId: null });
+    await renderDetail(mock, item);
+    mock.on("POST", `/items/${item.id}/claim`, () => ({
+      status: 409,
+      body: { error: "Work item is no longer claimable", code: "NOT_CLAIMABLE" },
+    }));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /claim this item/i }));
+
+    expect(await screen.findByText(/can no longer be claimed/i)).toBeInTheDocument();
+    // Item should be re-fetched to show current state
+    await waitFor(() => expect(mock.requestsFor("GET", `/items/${item.id}`).length).toBeGreaterThan(1), { timeout: 10000 });
+  });
 });

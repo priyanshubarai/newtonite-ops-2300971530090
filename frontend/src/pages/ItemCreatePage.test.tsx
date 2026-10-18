@@ -66,7 +66,7 @@ describe("ItemCreatePage", () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText(/title/i), "Assign me");
-    await user.click(screen.getByRole("button", { name: /assign to me/i }));
+    await user.click(screen.getByRole("button", { name: /assign this work item to yourself/i }));
     await user.click(screen.getByRole("button", { name: /create work item/i }));
 
     await waitFor(() => expect(mock.requestsFor("POST", "/items")).toHaveLength(1));

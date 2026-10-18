@@ -43,19 +43,20 @@ describe("AppShell navigation", () => {
     const overviewLink = screen.getByRole("link", { name: /overview/i });
     expect(overviewLink).toBeInTheDocument();
     expect(overviewLink).toHaveAttribute("aria-disabled", "true");
-    expect(overviewLink).toHaveAttribute("title", "Operational dashboard (not yet implemented)");
+    // The tooltip is now implemented as visually hidden text
+    expect(overviewLink).toHaveTextContent(/not yet implemented/i);
 
     const assignedLink = screen.getByRole("link", { name: /assigned to me/i });
     expect(assignedLink).toHaveAttribute("aria-disabled", "true");
-    expect(assignedLink).toHaveAttribute("title", "Items assigned to you (not yet implemented)");
+    expect(assignedLink).toHaveTextContent(/not yet implemented/i);
 
     const attentionLink = screen.getByRole("link", { name: /needs attention/i });
     expect(attentionLink).toHaveAttribute("aria-disabled", "true");
-    expect(attentionLink).toHaveAttribute("title", "Urgent, unassigned, or awaiting-approval items (not yet implemented)");
+    expect(attentionLink).toHaveTextContent(/not yet implemented/i);
 
     const teamsLink = screen.getByRole("link", { name: /teams/i });
     expect(teamsLink).toHaveAttribute("aria-disabled", "true");
-    expect(teamsLink).toHaveAttribute("title", "Team selection and context (not yet implemented)");
+    expect(teamsLink).toHaveTextContent(/not yet implemented/i);
   });
 
   it("shows a 'Soon' badge on disabled navigation items", async () => {

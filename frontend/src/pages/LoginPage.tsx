@@ -114,7 +114,13 @@ export function LoginPage() {
             )}
           </FormField>
 
-          <button type="submit" className="button button--primary button--block" disabled={submitting}>
+          <button
+            type="submit"
+            className="button button--primary button--block"
+            disabled={submitting}
+            aria-disabled={submitting}
+            aria-busy={submitting}
+          >
             {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>

@@ -72,9 +72,13 @@ export function ItemDetailPage() {
       if (isApiError(error) && error.status === 409) {
         await itemQuery.refetch();
         setNeedsReload(false);
-        setActionError(
-          "Another user claimed this item first, or it is no longer claimable. The latest details are shown below.",
-        );
+        if (error.code === "NOT_CLAIMABLE") {
+          setActionError("This work item can no longer be claimed. The latest details are shown below.");
+        } else {
+          setActionError(
+            "Another user claimed this item first, or it is no longer claimable. The latest details are shown below.",
+          );
+        }
       } else if (isForbidden(error)) {
         setActionError("Your role in this team doesn't allow claiming work items.");
       } else {
@@ -244,6 +248,7 @@ export function ItemDetailPage() {
                 type="button"
                 className="button button--primary"
                 disabled={acting}
+                aria-busy={claimMutation.isPending}
                 onClick={() => claimMutation.mutate()}
               >
                 {claimMutation.isPending ? "Claiming…" : "Claim this item"}
@@ -258,6 +263,7 @@ export function ItemDetailPage() {
                 type="button"
                 className="button button--primary"
                 disabled={acting}
+                aria-busy={transitionMutation.isPending}
                 onClick={() => transitionMutation.mutate(item.version)}
               >
                 {transitionMutation.isPending

@@ -219,6 +219,7 @@ export function ItemFormFields({
             className="button button--ghost"
             disabled={disabled}
             onClick={() => onChange("assigneeId", currentUserId)}
+            aria-label="Assign this work item to yourself"
           >
             Assign to me
           </button>

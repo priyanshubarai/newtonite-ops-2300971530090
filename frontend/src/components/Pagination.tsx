@@ -32,10 +32,11 @@ export function Pagination({
           className="button"
           onClick={() => onPageChange(page - 1)}
           disabled={!hasPrevPage || busy}
+          aria-label="Previous page"
         >
           Previous
         </button>
-        <span className="pagination__page">
+        <span className="pagination__page" aria-live="polite">
           Page {page} of {pageCount}
         </span>
         <button
@@ -43,6 +44,7 @@ export function Pagination({
           className="button"
           onClick={() => onPageChange(page + 1)}
           disabled={!hasNextPage || busy}
+          aria-label="Next page"
         >
           Next
         </button>
