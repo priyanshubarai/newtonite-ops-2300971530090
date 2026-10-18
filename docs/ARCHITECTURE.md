@@ -15,7 +15,7 @@ The following stack is authoritative and must be documented exactly as specified
 | Frontend | React + TypeScript | Client-side user interface |
 | Frontend Server-State | TanStack Query | Data fetching, caching, synchronization |
 | Backend | Node.js + Express + TypeScript | REST API server |
-| Database | PostgreSQL | Source of truth for all business data |
+| Database | PostgreSQL (hosted on Neon) | Source of truth for all business data |
 | ORM | Drizzle ORM | Typed schema definitions and queries |
 | Migration Tooling | Drizzle Kit | Database schema migrations |
 | Testing | Vitest + Supertest | Unit and integration testing |
@@ -25,6 +25,14 @@ The following stack is authoritative and must be documented exactly as specified
 - **Prisma is prohibited.**
 - Architecture is a **modular monolith**.
 - PostgreSQL is the source of truth for business data, audit history, idempotency records, and durable background-job intent.
+
+### Database Provider (Neon)
+
+PostgreSQL is hosted on **Neon**. The `DATABASE_URL` environment variable supplies the Neon connection string to both the runtime client and Drizzle Kit.
+
+- **Runtime driver:** `drizzle-orm/neon-serverless` — the Neon WebSocket `Pool` from `@neondatabase/serverless`. Selected because atomic claims, optimistic concurrency, idempotency, and the transactional outbox require **interactive transactions**, which the `neon-http` driver does not support.
+- **Migration connection:** Drizzle Kit connects to Neon directly over the standard PostgreSQL wire protocol using the same `DATABASE_URL`.
+- **Node.js limitation:** The Neon serverless driver requires a `WebSocket` constructor under Node; the app sets `neonConfig.webSocketConstructor = ws` at startup.
 
 ## 3. Architectural Style
 

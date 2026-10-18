@@ -32,13 +32,21 @@ Newtonite Operations Under Pressure helps users understand:
 | Frontend | React + TypeScript | User interface |
 | Frontend State Management | TanStack Query | Server state fetching, caching, and synchronization |
 | Backend | Node.js + Express + TypeScript | REST API server |
-| Database | PostgreSQL | Source of truth for all business data |
+| Database | PostgreSQL (hosted on Neon) | Source of truth for all business data |
 | ORM | Drizzle ORM | Type-safe schema definitions and queries |
 | Migration Tooling | Drizzle Kit | Database schema migrations |
 | Testing | Vitest + Supertest | Unit and integration testing |
 | Local Development | Docker Compose | Local environment orchestration |
 
 **Constraints:** Prisma is prohibited. Architecture is a modular monolith.
+
+### Database Provider (Neon)
+
+PostgreSQL is hosted on **Neon**. The `DATABASE_URL` environment variable supplies the Neon connection string.
+
+- **Runtime driver:** `drizzle-orm/neon-serverless` (Neon WebSocket `Pool` via `@neondatabase/serverless`). Chosen because the later work-item, idempotency, activity-history, and outbox modules require **interactive transactions**. The `neon-http` driver is *not* used because it does not support them.
+- **Migration connection:** Drizzle Kit connects directly to Neon over the standard PostgreSQL wire protocol using the same `DATABASE_URL`.
+- **Limitation:** Neon's serverless WebSocket pool requires a `WebSocket` constructor in Node.js; the app sets `neonConfig.webSocketConstructor = ws` at startup.
 
 ## Key Features
 
@@ -95,38 +103,44 @@ See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status
 
 *The following setup instructions will be finalized during implementation phases. No working commands, credentials, or deployments are assumed in this documentation.*
 
-### Prerequisites (Planned)
+### Prerequisites
 - Node.js (LTS)
-- Docker and Docker Compose
-- PostgreSQL (via Docker Compose)
+- A Neon PostgreSQL database (connection string supplied by the developer)
+- Docker and Docker Compose (optional; no local PostgreSQL is required — see `docker-compose.yml`)
 
-### Environment Setup (Planned)
+### Environment Setup
 ```bash
 # Clone repository
 git clone <repository-url>
 cd newtonite-assignment
-
-# Start PostgreSQL
-docker compose up -d
 
 # Install dependencies (backend)
 cd backend && npm install
 
 # Install dependencies (frontend)
 cd frontend && npm install
+
+# Configure the database connection
+cp backend/.env.example backend/.env
+# Edit backend/.env and set DATABASE_URL to your Neon connection string.
+# DATABASE_URL is gitignored; never commit it.
 ```
 
-### Database Operations (Planned)
+### Database Operations (against Neon)
 ```bash
-# Generate migrations
+cd backend
+
+# Generate migrations (writes SQL files to src/db/migrations)
 npm run db:generate
 
-# Run migrations
+# Apply migrations to the Neon database referenced by DATABASE_URL
 npm run db:migrate
-
-# Seed database with demo data
-npm run db:seed
 ```
+
+> Drizzle Kit reads `DATABASE_URL` from `backend/.env`. The `db:push` script is **not** a substitute for the versioned migration workflow and should not be used to bypass migrations.
+
+### Seeding
+Seed scripts run against the same Neon database via `DATABASE_URL`. (Seed implementation arrives in Phase 2.)
 
 ### Running the Application (Planned)
 ### Running the Application

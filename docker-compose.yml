@@ -1,20 +1,8 @@
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: newtonite_postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: newtonite
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+# Local development now uses Neon-hosted PostgreSQL.
+# The DATABASE_URL environment variable (backend/.env) supplies the Neon
+# connection string; no local PostgreSQL container is required.
+#
+# This compose file is retained so unrelated services can be added later
+# without restructuring the repository. It intentionally defines no services.
 
-volumes:
-  postgres_data:
+services: {}
