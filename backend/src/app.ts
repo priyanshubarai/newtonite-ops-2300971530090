@@ -5,6 +5,8 @@ import { authRouter } from "./auth/routes.js";
 import { itemsRouter } from "./items/routes.js";
 import { ApiError } from "./common/errors.js";
 import { getCorsOrigins, validateCorsConfig } from "./config/env.js";
+import { logger } from "./lib/logger.js";
+import { requestIdMiddleware, accessLogMiddleware, requestContextMiddleware } from "./lib/morgan.js";
 
 /**
  * Application construction, separated from `listen` so tests (Supertest) can
@@ -14,6 +16,15 @@ const app = express();
 
 // Validate CORS configuration at startup (fails fast in production if misconfigured)
 validateCorsConfig();
+
+// Request ID middleware - must be first to ensure request ID is available for all downstream middleware
+app.use(requestIdMiddleware);
+
+// Morgan HTTP access logging - after request ID middleware so request ID is available
+app.use(accessLogMiddleware);
+
+// Request context middleware - attaches request ID to response locals for downstream use
+app.use(requestContextMiddleware);
 
 // CORS middleware - configured from environment variable
 const corsOrigins = getCorsOrigins();
@@ -58,13 +69,44 @@ function clientErrorStatus(err: unknown): number | undefined {
     : undefined;
 }
 
-// Central error handler. Any `next(err)` from async middleware lands here.
-// An `ApiError` carries an intentional client-safe status/message; a middleware
-// error with its own 4xx status keeps that status with a generic message;
-// anything else is an unexpected failure. Log server-side only; never leak
-// stack traces, SQL, or environment values to the client.
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+/**
+ * Sanitize an error for logging, removing sensitive information.
+ */
+function sanitizeErrorForLogging(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+  }
+  if (typeof err === "object" && err !== null) {
+    return { value: String(err) };
+  }
+  return { value: String(err) };
+}
+
+/**
+ * Central error handler. Any `next(err)` from async middleware lands here.
+ * An `ApiError` carries an intentional client-safe status/message; a middleware
+ * error with its own 4xx status keeps that status with a generic message;
+ * anything else is an unexpected failure. Log server-side only; never leak
+ * stack traces, SQL, or environment values to the client.
+ */
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const requestId = (req as import("./lib/morgan.js").RequestWithId).requestId;
+  const logContext = { requestId };
+
   if (err instanceof ApiError) {
+    // Expected client errors (4xx) - log at debug/info level, not error
+    const logLevel = err.status >= 500 ? "error" : err.status >= 400 ? "debug" : "info";
+    logger.log(logLevel, "Request error", {
+      ...logContext,
+      status: err.status,
+      code: err.code,
+      message: err.message,
+    });
+
     // Keep the established `{ error }` body and add the optional stable `code`
     // and client-safe field `details` when present.
     const body: Record<string, unknown> = { error: err.message };
@@ -76,6 +118,13 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
   const status = clientErrorStatus(err);
   if (status !== undefined) {
+    // Client errors from middleware (malformed JSON, oversized body, etc.)
+    logger.debug("Client error", {
+      ...logContext,
+      status,
+      message: err instanceof Error ? err.message : String(err),
+    });
+
     // A malformed JSON body must be a 400, an oversized body a 413 - never a
     // 500. The message is generic and never echoes parser/SQL internals.
     const message =
@@ -88,9 +137,12 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
     return;
   }
 
-  // eslint-disable-next-line no-console
-  console.error("unhandled error");
-  void err;
+  // Unexpected server error - log with full context at error level
+  logger.error("Unhandled server error", {
+    ...logContext,
+    error: sanitizeErrorForLogging(err),
+  });
+
   if (!res.headersSent) {
     res.status(500).json({ error: "Internal server error" });
   }

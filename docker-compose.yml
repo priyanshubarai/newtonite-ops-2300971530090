@@ -1,8 +1,0 @@
-# Local development now uses Neon-hosted PostgreSQL.
-# The DATABASE_URL environment variable (backend/.env) supplies the Neon
-# connection string; no local PostgreSQL container is required.
-#
-# This compose file is retained so unrelated services can be added later
-# without restructuring the repository. It intentionally defines no services.
-
-services: {}
