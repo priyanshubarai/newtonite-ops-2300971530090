@@ -11,12 +11,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchMe } from "../api/auth";
 import { setUnauthorizedHandler } from "../api/client";
 import type { AuthUser, Membership } from "../api/types";
-import { clearToken, getToken, setToken, subscribeToken } from "./tokenStore";
+import { clearToken, getToken, initializeToken, setToken, subscribeToken } from "./tokenStore";
 
 /**
  * Session state for the whole app.
  *
- * The token itself lives in `tokenStore` (in-memory only). This provider
+ * The token lives in `tokenStore` (persisted to localStorage). This provider
  * derives the current user + memberships from `GET /auth/me` whenever a token
  * is present, and wires the API client's 401 handler to drop the session so an
  * expired token sends the user back to the login screen.
@@ -41,6 +41,11 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const token = useSyncExternalStore(subscribeToken, getToken, getToken);
   const queryClient = useQueryClient();
+
+  // Initialize token from localStorage on first render
+  useEffect(() => {
+    initializeToken();
+  }, []);
 
   // Any authenticated request answered with 401 means the session is no longer
   // valid: clear the token and drop cached server state.
