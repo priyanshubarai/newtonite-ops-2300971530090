@@ -17,9 +17,9 @@ const envSchema = z.object({
   JWT_SECRET: z
     .string({ required_error: "JWT_SECRET is required" })
     .min(32, "JWT_SECRET must be at least 32 characters"),
-  // Auth token lifetime in seconds (default 15 minutes). Kept short because
-  // memberships/roles are loaded from the database on every request.
-  JWT_EXPIRES_IN: z.coerce.number().int().positive().default(900),
+  // Auth token lifetime in seconds (default 24 hours). Memberships/roles are
+  // loaded from the database on every request, so token can be longer-lived.
+  JWT_EXPIRES_IN: z.coerce.number().int().positive().default(86400),
   // CORS configuration. In production, CORS_ORIGIN must be explicitly set to the
   // deployed frontend origin (e.g. "https://app.example.com"). Multiple origins
   // can be provided as a comma-separated list. In development, defaults to

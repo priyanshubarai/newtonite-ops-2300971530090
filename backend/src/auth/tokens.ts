@@ -3,11 +3,11 @@ import type { Algorithm } from "jsonwebtoken";
 import { env } from "../config/env.js";
 
 /**
- * Auth tokens are short-lived, signed HS256 JWTs carrying only the user's
+ * Auth tokens are signed HS256 JWTs carrying only the user's
  * subject id. Roles and memberships are deliberately NOT embedded here - they
  * are loaded from the database on every request so that role changes and
  * membership revocations take effect immediately rather than waiting for a
- * token to expire.
+ * token to expire. Token lifetime is configurable via JWT_EXPIRES_IN (default 24h).
  */
 
 // Pin the allowed algorithm so a token signed with `none` or a different
