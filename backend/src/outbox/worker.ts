@@ -17,6 +17,8 @@ import {
   rescheduleJob,
   type OutboxJobRow,
 } from "./repository.js";
+import { logger } from "../lib/logger.js";
+import { logWorkerEvent, logOutboxJobEvent, type OutboxJobLogContext, type WorkerLogContext } from "../lib/events.js";
 
 /**
  * The outbox worker loop.
@@ -60,6 +62,8 @@ export interface WorkerConfig {
   processJob: (job: OutboxJobRow) => Promise<unknown>;
   /** Structured log sink. Injectable so tests can capture records. */
   log: WorkerLogFn;
+  /** Worker instance identifier for correlation. */
+  workerId: string;
 }
 
 /**
@@ -77,6 +81,7 @@ export function resolveWorkerConfig(overrides: Partial<WorkerConfig> = {}): Work
     leaseTimeoutMs: overrides.leaseTimeoutMs ?? env.OUTBOX_LEASE_TIMEOUT_MS,
     processJob: overrides.processJob ?? processOutboxJob,
     log: overrides.log ?? logEvent,
+    workerId: overrides.workerId ?? `worker-${process.pid}-${Date.now()}`,
   };
 }
 
@@ -127,11 +132,26 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
     leasesExhausted: 0,
   };
 
+  const workerContext: WorkerLogContext = {
+    workerId: config.workerId,
+    batchSize: config.batchSize,
+    pollIntervalMs: config.pollIntervalMs,
+    leaseTimeoutMs: config.leaseTimeoutMs,
+    backoffBaseMs: config.backoffBaseMs,
+    backoffMaxMs: config.backoffMaxMs,
+    jobTypes: [...config.jobTypes],
+  };
+
   // Recover first, so anything rescued in this iteration is claimable below.
   const reclaim = await reclaimExpiredLeases(config.leaseTimeoutMs);
   summary.reclaimed = reclaim.reclaimed;
   summary.leasesExhausted = reclaim.exhausted;
   if (reclaim.reclaimed > 0 || reclaim.exhausted > 0) {
+    logWorkerEvent(logger, "info", "outbox.job.lease_recovered", {
+      ...workerContext,
+      reclaimed: reclaim.reclaimed,
+      exhausted: reclaim.exhausted,
+    });
     safeLog(config, {
       event: "worker.leases_recovered",
       reclaimed: reclaim.reclaimed,
@@ -151,11 +171,28 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
     // the final permitted attempt.
     const attemptsExhausted = job.attemptCount >= job.maxAttempts;
 
+    // Log job claimed
+    logOutboxJobEvent(logger, "info", "outbox.job.claimed", {
+      jobId: job.id,
+      jobType: job.jobType,
+      workerId: config.workerId,
+      attempt: job.attemptCount,
+      maxAttempts: job.maxAttempts,
+    });
+
     try {
       await config.processJob(job);
 
       if (await markJobCompleted(job.id)) {
         summary.processed += 1;
+        logOutboxJobEvent(logger, "info", "outbox.job.acknowledged", {
+          jobId: job.id,
+          jobType: job.jobType,
+          workerId: config.workerId,
+          attempt: job.attemptCount,
+          maxAttempts: job.maxAttempts,
+          durationMs: 0, // Not tracked currently
+        });
         safeLog(config, {
           event: "worker.job_completed",
           jobId: job.id,
@@ -165,6 +202,14 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
         });
       } else {
         summary.skipped += 1;
+        logOutboxJobEvent(logger, "warn", "outbox.job.state_lost", {
+          jobId: job.id,
+          jobType: job.jobType,
+          workerId: config.workerId,
+          attempt: job.attemptCount,
+          maxAttempts: job.maxAttempts,
+          category: "state_lost",
+        });
         safeLog(config, {
           event: "worker.job_state_lost",
           jobId: job.id,
@@ -180,6 +225,16 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
         const recorded = await failJob(job.id, detail);
         if (recorded) {
           summary.failed += 1;
+          logOutboxJobEvent(logger, "error", "outbox.job.failed", {
+            jobId: job.id,
+            jobType: job.jobType,
+            workerId: config.workerId,
+            attempt: job.attemptCount,
+            maxAttempts: job.maxAttempts,
+            category,
+            permanent,
+            outcome: "dead_lettered",
+          });
           safeLog(config, {
             event: "worker.job_failed",
             jobId: job.id,
@@ -198,6 +253,18 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
         const recorded = await rescheduleJob(job.id, delayMs, detail);
         if (recorded) {
           summary.retried += 1;
+          const retryScheduledAt = new Date(Date.now() + delayMs).toISOString();
+          logOutboxJobEvent(logger, "warn", "outbox.job.retry_scheduled", {
+            jobId: job.id,
+            jobType: job.jobType,
+            workerId: config.workerId,
+            attempt: job.attemptCount,
+            maxAttempts: job.maxAttempts,
+            category,
+            delayMs,
+            retryScheduledAt,
+            outcome: "retry_scheduled",
+          });
           safeLog(config, {
             event: "worker.job_retry_scheduled",
             jobId: job.id,
@@ -244,6 +311,17 @@ export function startOutboxLoop(config: WorkerConfig): OutboxLoopHandle {
     resolveFinished = resolve;
   });
 
+  const workerContext: WorkerLogContext = {
+    workerId: config.workerId,
+    batchSize: config.batchSize,
+    pollIntervalMs: config.pollIntervalMs,
+    leaseTimeoutMs: config.leaseTimeoutMs,
+    backoffBaseMs: config.backoffBaseMs,
+    backoffMaxMs: config.backoffMaxMs,
+    jobTypes: [...config.jobTypes],
+  };
+
+  logWorkerEvent(logger, "info", "worker.started", workerContext);
   safeLog(config, {
     event: "worker.started",
     batchSize: config.batchSize,
@@ -279,11 +357,25 @@ export function startOutboxLoop(config: WorkerConfig): OutboxLoopHandle {
             summary.reclaimed > 0 ||
             summary.leasesExhausted > 0
           ) {
+            logWorkerEvent(logger, "debug", "worker.batch", {
+              ...workerContext,
+              claimed: summary.claimed,
+              processed: summary.processed,
+              retried: summary.retried,
+              failed: summary.failed,
+              skipped: summary.skipped,
+              reclaimed: summary.reclaimed,
+              leasesExhausted: summary.leasesExhausted,
+            });
             safeLog(config, { event: "worker.batch", ...summary });
           }
         } catch (cause) {
           // A failed poll must not kill the worker; log the category and try
           // again after the poll interval.
+          logWorkerEvent(logger, "error", "worker.iteration_failed", {
+            ...workerContext,
+            category: categorizeError(cause),
+          });
           safeLog(config, {
             event: "worker.iteration_failed",
             category: categorizeError(cause),
@@ -295,6 +387,7 @@ export function startOutboxLoop(config: WorkerConfig): OutboxLoopHandle {
         await sleep(config.pollIntervalMs);
       }
     } finally {
+      logWorkerEvent(logger, "info", "worker.shutdown_complete", workerContext);
       safeLog(config, { event: "worker.stopped" });
       resolveFinished();
     }
@@ -303,7 +396,16 @@ export function startOutboxLoop(config: WorkerConfig): OutboxLoopHandle {
   // `loop` cannot reject: job failures are handled per job, poll failures are
   // caught per iteration, and logging is guarded. The catch is belt-and-braces
   // against an unhandled rejection.
-  void loop().catch(() => {
+  void loop().catch((cause) => {
+    logWorkerEvent(logger, "error", "worker.unhandled_rejection", {
+      ...workerContext,
+      category: categorizeError(cause),
+    });
+    safeLog(config, {
+      event: "worker.unhandled_rejection",
+      category: categorizeError(cause),
+      detail: toStoredError(cause),
+    });
     resolveFinished();
   });
 
@@ -313,6 +415,7 @@ export function startOutboxLoop(config: WorkerConfig): OutboxLoopHandle {
         await finished;
         return;
       }
+      logWorkerEvent(logger, "info", "worker.shutdown_requested", workerContext);
       stopping = true;
       // Wake the poller so shutdown is prompt.
       wakeFromSleep?.();

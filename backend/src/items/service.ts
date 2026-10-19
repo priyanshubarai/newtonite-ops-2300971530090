@@ -41,6 +41,8 @@ import type {
   TransitionItemInput,
   UpdateItemInput,
 } from "./validation.js";
+import { logger } from "../lib/logger.js";
+import { logConflictEvent, logTransactionOutcome, type ConflictLogContext } from "../lib/events.js";
 
 /**
  * Work-item domain service.
@@ -274,6 +276,17 @@ export async function createComment(
   // Also insert outbox job for the comment
   await insertOutboxJobTx(tx, buildOutboxJob(item, OUTBOX_JOB_TYPES.ITEM_UPDATED, userId));
 
+  logger.info("Comment created", {
+    event: "comment.create.committed",
+    operation: "comment.create",
+    itemId,
+    teamId: item.teamId,
+    businessChangeCommitted: true,
+    activityEventsWritten: 1,
+    outboxJobsInserted: 1,
+    idempotencyRecordWritten: false,
+  });
+
   return {
     comment: {
       id: comment.id,
@@ -362,6 +375,19 @@ export async function createItem(
   });
 
   await recordMutation(tx, row, userId, [itemCreatedEvent(row)], OUTBOX_JOB_TYPES.ITEM_CREATED);
+
+  // Log successful creation (transaction will commit after this returns)
+  logger.info("Item created", {
+    event: "item.create.committed",
+    operation: "item.create",
+    itemId: row.id,
+    teamId: row.teamId,
+    businessChangeCommitted: true,
+    activityEventsWritten: 1,
+    outboxJobsInserted: 1,
+    idempotencyRecordWritten: false, // Set by idempotency wrapper
+  });
+
   return toWorkItemResponse(row);
 }
 
@@ -407,8 +433,22 @@ export async function updateItem(
   if (events.length === 0) {
     // Nothing actually changed. Still honour the concurrency precondition.
     if (existing.version !== expectedVersion) {
+      logConflictEvent(logger, {
+        requestId: undefined,
+        operation: "item.update",
+        itemId: id,
+        teamId: existing.teamId,
+        conflictType: "stale_version",
+        message: "Work item was modified by another request",
+      });
       throw staleVersion();
     }
+    logger.info("Item update noop", {
+      event: "item.update.noop",
+      operation: "item.update",
+      itemId: id,
+      teamId: existing.teamId,
+    });
     return toWorkItemResponse(existing);
   }
 
@@ -419,10 +459,30 @@ export async function updateItem(
     if (!current) {
       throw notFound();
     }
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.update",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "stale_version",
+      message: "Work item was modified by another request",
+    });
     throw staleVersion();
   }
 
   await recordMutation(tx, row, userId, events, OUTBOX_JOB_TYPES.ITEM_UPDATED);
+
+  logger.info("Item updated", {
+    event: "item.update.committed",
+    operation: "item.update",
+    itemId: row.id,
+    teamId: row.teamId,
+    businessChangeCommitted: true,
+    activityEventsWritten: events.length,
+    outboxJobsInserted: 1,
+    idempotencyRecordWritten: false,
+  });
+
   return toWorkItemResponse(row);
 }
 
@@ -450,9 +510,25 @@ export async function claimItem(
   }
 
   if (existing.assigneeId !== null) {
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.claim",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "lost_race",
+      message: "Work item is already assigned",
+    });
     throw conflict(ERROR_CODES.ALREADY_ASSIGNED, "Work item is already assigned");
   }
   if (!CLAIMABLE_STATUSES.includes(existing.status)) {
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.claim",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "not_claimable",
+      message: `A work item in status ${existing.status} cannot be claimed`,
+    });
     throw conflict(
       ERROR_CODES.NOT_CLAIMABLE,
       `A work item in status ${existing.status} cannot be claimed`,
@@ -467,8 +543,24 @@ export async function claimItem(
       throw notFound();
     }
     if (current.assigneeId !== null) {
+      logConflictEvent(logger, {
+        requestId: undefined,
+        operation: "item.claim",
+        itemId: id,
+        teamId: existing.teamId,
+        conflictType: "lost_race",
+        message: "Work item is already assigned",
+      });
       throw conflict(ERROR_CODES.ALREADY_ASSIGNED, "Work item is already assigned");
     }
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.claim",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "not_claimable",
+      message: "Work item is no longer claimable",
+    });
     throw conflict(ERROR_CODES.NOT_CLAIMABLE, "Work item is no longer claimable");
   }
 
@@ -479,6 +571,18 @@ export async function claimItem(
     [assigneeChangedEvent(null, userId, "claim")],
     OUTBOX_JOB_TYPES.ITEM_CLAIMED,
   );
+
+  logger.info("Item claimed", {
+    event: "item.claim.committed",
+    operation: "item.claim",
+    itemId: row.id,
+    teamId: row.teamId,
+    businessChangeCommitted: true,
+    activityEventsWritten: 1,
+    outboxJobsInserted: 1,
+    idempotencyRecordWritten: false,
+  });
+
   return toWorkItemResponse(row);
 }
 
@@ -508,10 +612,30 @@ export async function transitionItem(
     : "edit_item";
   const authz = await authorizeTeamAction(userId, existing.teamId, requiredAction);
   if (!authz.ok) {
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.transition",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "unauthorized",
+      message: "Insufficient permissions for this transition",
+    });
     throwAuthzFailure(authz);
   }
 
-  assertValidTransition(existing.status, input.toStatus);
+  try {
+    assertValidTransition(existing.status, input.toStatus);
+  } catch (error) {
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.transition",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "invalid_transition",
+      message: error instanceof Error ? error.message : "Invalid transition",
+    });
+    throw error;
+  }
 
   const row = await transitionWorkItemTx(
     tx,
@@ -525,6 +649,14 @@ export async function transitionItem(
     if (!current) {
       throw notFound();
     }
+    logConflictEvent(logger, {
+      requestId: undefined,
+      operation: "item.transition",
+      itemId: id,
+      teamId: existing.teamId,
+      conflictType: "stale_version",
+      message: "Work item was modified by another request",
+    });
     throw staleVersion();
   }
 
@@ -535,6 +667,18 @@ export async function transitionItem(
     [statusChangedEvent(existing.status, row.status)],
     OUTBOX_JOB_TYPES.ITEM_TRANSITIONED,
   );
+
+  logger.info("Item transitioned", {
+    event: "item.transition.committed",
+    operation: "item.transition",
+    itemId: row.id,
+    teamId: row.teamId,
+    businessChangeCommitted: true,
+    activityEventsWritten: 1,
+    outboxJobsInserted: 1,
+    idempotencyRecordWritten: false,
+  });
+
   return toWorkItemResponse(row);
 }
 

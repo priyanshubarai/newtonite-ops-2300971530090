@@ -207,6 +207,27 @@ Set in `backend/.env` (gitignored). See `backend/.env.example` for blank placeho
 
 **Demo login (development-only):** any seeded email shares the same password. Set `DEMO_PASSWORD` in `backend/.env` before running `npm run seed` (the seed defaults to `newtonite-demo` if the variable is not set). Example: `avery@newtonite.dev` / `newtonite-demo`. These are development-only credentials and must never be used in production.
 
+### Seeded Demo Users (10 users)
+
+All seeded users share the same password (`newtonite-demo` by default, configurable via `DEMO_PASSWORD`). The seed creates 4 teams and 10 users with deterministic UUIDs, covering all four roles (Viewer, Member, Lead, Admin) across multiple teams. Several users belong to multiple teams.
+
+| Email | Name | Team(s) & Role(s) |
+|-------|------|-------------------|
+| `avery@newtonite.dev` | Avery Chen | Payments (Admin), Platform (Admin) |
+| `blake@newtonite.dev` | Blake Rivera | Payments (Lead), Support (Member) |
+| `casey@newtonite.dev` | Casey Morgan | Support (Lead) |
+| `devon@newtonite.dev` | Devon Park | Compliance (Lead) |
+| `emery@newtonite.dev` | Emery Sutton | Platform (Lead) |
+| `finley@newtonite.dev` | Finley Brooks | Payments (Member), Compliance (Member) |
+| `gray@newtonite.dev` | Gray Nakamura | Support (Member) |
+| `harper@newtonite.dev` | Harper Diaz | Compliance (Member), Platform (Member) |
+| `indigo@newtonite.dev` | Indigo Frost | Payments (Viewer) |
+| `juniper@newtonite.dev` | Juniper Wells | Support (Viewer) |
+
+**Password (all users):** `newtonite-demo` (default, configurable via `DEMO_PASSWORD` env var)
+
+> **Security note:** These are development-only credentials. Passwords are stored as bcrypt hashes — never plaintext. Do not reuse this password anywhere real. The seed is idempotent and uses deterministic UUIDs, so re-running `npm run seed` will not create duplicates.
+
 ### Team-scoped role model
 
 Roles are assigned **per team** via team membership; a user can hold different roles in different teams. There is no global role and no "admin everywhere" bypass — every permission check resolves the user's role for one specific team.

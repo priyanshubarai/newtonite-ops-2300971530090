@@ -4,6 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { db, type TxClient } from "../db/index.js";
 import { idempotencyRecords } from "../db/schema/idempotency_records.js";
 import { badRequest, conflict, ERROR_CODES } from "./errors.js";
+import { logger } from "../lib/logger.js";
+import { logTransactionOutcome, logIdempotencyEvent, type TransactionLogContext } from "../lib/events.js";
 
 /**
  * Database-backed idempotency for mutation endpoints.
@@ -95,13 +97,39 @@ export async function runIdempotentMutation(
 ): Promise<void> {
   const header = req.header(IDEMPOTENCY_HEADER);
   const key = typeof header === "string" ? header.trim() : "";
+  const requestId = (req as Request & { requestId?: string }).requestId;
+  const startTime = Date.now();
 
   // No key: still run inside a transaction so the mutation, its activity event,
   // and its outbox job commit atomically.
   if (key === "") {
-    const result = await db.transaction(business);
-    res.status(result.status).json(result.body);
-    return;
+    try {
+      const result = await db.transaction(business);
+      logTransactionOutcome(logger, {
+        requestId,
+        operation,
+        transactionOutcome: "committed",
+        durationMs: Date.now() - startTime,
+        businessChangeCommitted: true,
+        activityEventsWritten: 0, // Unknown here, but service can log details
+        outboxJobsInserted: 0,
+        idempotencyRecordWritten: false,
+      });
+      res.status(result.status).json(result.body);
+      return;
+    } catch (error) {
+      logTransactionOutcome(logger, {
+        requestId,
+        operation,
+        transactionOutcome: "rolled_back",
+        durationMs: Date.now() - startTime,
+        businessChangeCommitted: false,
+        activityEventsWritten: 0,
+        outboxJobsInserted: 0,
+        idempotencyRecordWritten: false,
+      });
+      throw error;
+    }
   }
 
   if (key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
@@ -136,6 +164,7 @@ export async function runIdempotentMutation(
       }
       if (existing.state === "COMPLETED") {
         // Same key, same request: replay the original outcome verbatim.
+        logIdempotencyEvent(logger, "replay", { requestId, operation, key });
         return {
           kind: "replay" as const,
           status: existing.statusCode ?? 200,
@@ -178,11 +207,24 @@ export async function runIdempotentMutation(
   });
 
   if (outcome.kind === "key_reused") {
+    logIdempotencyEvent(logger, "key_reused", { requestId, operation, key });
     throw conflict(
       ERROR_CODES.IDEMPOTENCY_KEY_REUSED,
       "Idempotency-Key was already used with a different request payload",
     );
   }
+
+  // Transaction committed successfully
+  logTransactionOutcome(logger, {
+    requestId,
+    operation,
+    transactionOutcome: "committed",
+    durationMs: Date.now() - startTime,
+    businessChangeCommitted: true,
+    activityEventsWritten: 0,
+    outboxJobsInserted: 0,
+    idempotencyRecordWritten: true,
+  });
 
   res.status(outcome.status).json(outcome.body);
 }
