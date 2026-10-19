@@ -42,7 +42,15 @@ import type {
   UpdateItemInput,
 } from "./validation.js";
 import { logger } from "../lib/logger.js";
-import { logConflictEvent, logTransactionOutcome, type ConflictLogContext } from "../lib/events.js";
+import {
+  logConflictEvent,
+  logTransactionOutcome,
+  logTransactionStarted,
+  logActivityInsertedInTransaction,
+  logOutboxInsertedInTransaction,
+  logBusinessOperation,
+  type ConflictLogContext,
+} from "../lib/events.js";
 
 /**
  * Work-item domain service.
@@ -255,9 +263,12 @@ export async function createComment(
   userId: string,
   itemId: string,
   input: CreateCommentInput,
+  requestId?: string
 ): Promise<{ comment: { id: string; workItemId: string; authorId: string; body: string; createdAt: string; updatedAt: string } }> {
   // First verify the item exists and user has access
   const item = await getItem(userId, itemId);
+
+  logTransactionStarted(logger, { requestId, operation: "comment.create", itemId, teamId: item.teamId });
 
   const comment = await insertCommentTx(tx, {
     workItemId: itemId,
@@ -276,15 +287,16 @@ export async function createComment(
   // Also insert outbox job for the comment
   await insertOutboxJobTx(tx, buildOutboxJob(item, OUTBOX_JOB_TYPES.ITEM_UPDATED, userId));
 
-  logger.info("Comment created", {
-    event: "comment.create.committed",
+  logActivityInsertedInTransaction(logger, { requestId, itemId, eventType: "COMMENT_ADDED" });
+  logOutboxInsertedInTransaction(logger, { requestId, itemId, jobType: OUTBOX_JOB_TYPES.ITEM_UPDATED });
+
+  logBusinessOperation(logger, {
+    requestId,
     operation: "comment.create",
     itemId,
     teamId: item.teamId,
-    businessChangeCommitted: true,
-    activityEventsWritten: 1,
-    outboxJobsInserted: 1,
-    idempotencyRecordWritten: false,
+    userId,
+    message: `User added comment to item ${itemId}`,
   });
 
   return {
@@ -329,6 +341,7 @@ async function recordMutation(
   actorId: string,
   events: DerivedEvent[],
   jobType: (typeof OUTBOX_JOB_TYPES)[keyof typeof OUTBOX_JOB_TYPES],
+  requestId?: string
 ): Promise<void> {
   for (const event of events) {
     await insertActivityEventTx(tx, {
@@ -337,8 +350,10 @@ async function recordMutation(
       eventType: event.eventType,
       metadata: event.metadata,
     });
+    logActivityInsertedInTransaction(logger, { requestId, itemId: row.id, eventType: event.eventType });
   }
   await insertOutboxJobTx(tx, buildOutboxJob(row, jobType, actorId));
+  logOutboxInsertedInTransaction(logger, { requestId, itemId: row.id, jobType });
 }
 
 /**
@@ -353,6 +368,7 @@ export async function createItem(
   tx: TxClient,
   userId: string,
   input: CreateItemInput,
+  requestId?: string
 ): Promise<WorkItemResponse> {
   const authz = await authorizeTeamAction(userId, input.teamId, "create_item");
   if (!authz.ok) {
@@ -362,6 +378,8 @@ export async function createItem(
   if (input.assigneeId) {
     await assertSameTeamMember(input.assigneeId, input.teamId);
   }
+
+  logTransactionStarted(logger, { requestId, operation: "item.create", itemId: undefined, teamId: input.teamId });
 
   const row = await insertWorkItemTx(tx, {
     title: input.title,
@@ -374,18 +392,15 @@ export async function createItem(
     dueAt: input.dueAt ?? null,
   });
 
-  await recordMutation(tx, row, userId, [itemCreatedEvent(row)], OUTBOX_JOB_TYPES.ITEM_CREATED);
+  await recordMutation(tx, row, userId, [itemCreatedEvent(row)], OUTBOX_JOB_TYPES.ITEM_CREATED, requestId);
 
-  // Log successful creation (transaction will commit after this returns)
-  logger.info("Item created", {
-    event: "item.create.committed",
+  logBusinessOperation(logger, {
+    requestId,
     operation: "item.create",
     itemId: row.id,
     teamId: row.teamId,
-    businessChangeCommitted: true,
-    activityEventsWritten: 1,
-    outboxJobsInserted: 1,
-    idempotencyRecordWritten: false, // Set by idempotency wrapper
+    userId,
+    message: `User created item ${row.id}`,
   });
 
   return toWorkItemResponse(row);
@@ -405,6 +420,7 @@ export async function updateItem(
   userId: string,
   id: string,
   input: UpdateItemInput,
+  requestId?: string
 ): Promise<WorkItemResponse> {
   const existing = await findWorkItemById(id);
   if (!existing) {
@@ -434,7 +450,7 @@ export async function updateItem(
     // Nothing actually changed. Still honour the concurrency precondition.
     if (existing.version !== expectedVersion) {
       logConflictEvent(logger, {
-        requestId: undefined,
+        requestId,
         operation: "item.update",
         itemId: id,
         teamId: existing.teamId,
@@ -452,6 +468,8 @@ export async function updateItem(
     return toWorkItemResponse(existing);
   }
 
+  logTransactionStarted(logger, { requestId, operation: "item.update", itemId: id, teamId: existing.teamId });
+
   const row = await updateWorkItemTx(tx, id, expectedVersion, patch);
   if (!row) {
     // Either the item disappeared or another writer moved the version on.
@@ -460,7 +478,7 @@ export async function updateItem(
       throw notFound();
     }
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.update",
       itemId: id,
       teamId: existing.teamId,
@@ -470,17 +488,15 @@ export async function updateItem(
     throw staleVersion();
   }
 
-  await recordMutation(tx, row, userId, events, OUTBOX_JOB_TYPES.ITEM_UPDATED);
+  await recordMutation(tx, row, userId, events, OUTBOX_JOB_TYPES.ITEM_UPDATED, requestId);
 
-  logger.info("Item updated", {
-    event: "item.update.committed",
+  logBusinessOperation(logger, {
+    requestId,
     operation: "item.update",
     itemId: row.id,
     teamId: row.teamId,
-    businessChangeCommitted: true,
-    activityEventsWritten: events.length,
-    outboxJobsInserted: 1,
-    idempotencyRecordWritten: false,
+    userId,
+    message: `User updated item ${row.id}`,
   });
 
   return toWorkItemResponse(row);
@@ -498,6 +514,7 @@ export async function claimItem(
   tx: TxClient,
   userId: string,
   id: string,
+  requestId?: string
 ): Promise<WorkItemResponse> {
   const existing = await findWorkItemById(id);
   if (!existing) {
@@ -511,7 +528,7 @@ export async function claimItem(
 
   if (existing.assigneeId !== null) {
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.claim",
       itemId: id,
       teamId: existing.teamId,
@@ -522,7 +539,7 @@ export async function claimItem(
   }
   if (!CLAIMABLE_STATUSES.includes(existing.status)) {
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.claim",
       itemId: id,
       teamId: existing.teamId,
@@ -535,6 +552,8 @@ export async function claimItem(
     );
   }
 
+  logTransactionStarted(logger, { requestId, operation: "item.claim", itemId: id, teamId: existing.teamId });
+
   const row = await claimWorkItemTx(tx, id, userId, CLAIMABLE_STATUSES);
   if (!row) {
     // Lost the race. Classify from the committed row without a second write.
@@ -544,7 +563,7 @@ export async function claimItem(
     }
     if (current.assigneeId !== null) {
       logConflictEvent(logger, {
-        requestId: undefined,
+        requestId,
         operation: "item.claim",
         itemId: id,
         teamId: existing.teamId,
@@ -554,7 +573,7 @@ export async function claimItem(
       throw conflict(ERROR_CODES.ALREADY_ASSIGNED, "Work item is already assigned");
     }
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.claim",
       itemId: id,
       teamId: existing.teamId,
@@ -570,17 +589,16 @@ export async function claimItem(
     userId,
     [assigneeChangedEvent(null, userId, "claim")],
     OUTBOX_JOB_TYPES.ITEM_CLAIMED,
+    requestId
   );
 
-  logger.info("Item claimed", {
-    event: "item.claim.committed",
+  logBusinessOperation(logger, {
+    requestId,
     operation: "item.claim",
     itemId: row.id,
     teamId: row.teamId,
-    businessChangeCommitted: true,
-    activityEventsWritten: 1,
-    outboxJobsInserted: 1,
-    idempotencyRecordWritten: false,
+    userId,
+    message: `User claimed item ${row.id}`,
   });
 
   return toWorkItemResponse(row);
@@ -601,6 +619,7 @@ export async function transitionItem(
   userId: string,
   id: string,
   input: TransitionItemInput,
+  requestId?: string
 ): Promise<WorkItemResponse> {
   const existing = await findWorkItemById(id);
   if (!existing) {
@@ -613,7 +632,7 @@ export async function transitionItem(
   const authz = await authorizeTeamAction(userId, existing.teamId, requiredAction);
   if (!authz.ok) {
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.transition",
       itemId: id,
       teamId: existing.teamId,
@@ -627,7 +646,7 @@ export async function transitionItem(
     assertValidTransition(existing.status, input.toStatus);
   } catch (error) {
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.transition",
       itemId: id,
       teamId: existing.teamId,
@@ -636,6 +655,8 @@ export async function transitionItem(
     });
     throw error;
   }
+
+  logTransactionStarted(logger, { requestId, operation: "item.transition", itemId: id, teamId: existing.teamId });
 
   const row = await transitionWorkItemTx(
     tx,
@@ -650,7 +671,7 @@ export async function transitionItem(
       throw notFound();
     }
     logConflictEvent(logger, {
-      requestId: undefined,
+      requestId,
       operation: "item.transition",
       itemId: id,
       teamId: existing.teamId,
@@ -666,17 +687,18 @@ export async function transitionItem(
     userId,
     [statusChangedEvent(existing.status, row.status)],
     OUTBOX_JOB_TYPES.ITEM_TRANSITIONED,
+    requestId
   );
 
-  logger.info("Item transitioned", {
-    event: "item.transition.committed",
+  const isApproval = isApprovalStep(existing.status, row.status);
+  const actionVerb = isApproval ? "approved" : "transitioned";
+  logBusinessOperation(logger, {
+    requestId,
     operation: "item.transition",
     itemId: row.id,
     teamId: row.teamId,
-    businessChangeCommitted: true,
-    activityEventsWritten: 1,
-    outboxJobsInserted: 1,
-    idempotencyRecordWritten: false,
+    userId,
+    message: `User ${actionVerb} item ${row.id} from ${existing.status} to ${row.status}`,
   });
 
   return toWorkItemResponse(row);

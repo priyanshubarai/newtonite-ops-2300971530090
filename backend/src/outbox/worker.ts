@@ -181,6 +181,14 @@ export async function runOutboxOnce(config: WorkerConfig): Promise<WorkerRunSumm
     });
 
     try {
+      logOutboxJobEvent(logger, "debug", "outbox.job.processing", {
+        jobId: job.id,
+        jobType: job.jobType,
+        workerId: config.workerId,
+        attempt: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+      });
+
       await config.processJob(job);
 
       if (await markJobCompleted(job.id)) {

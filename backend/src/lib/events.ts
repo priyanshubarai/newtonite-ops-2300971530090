@@ -14,6 +14,19 @@ export const SERVICE_OUTBOX_WORKER = "outbox-worker";
 
 // Event name constants
 export const EVENTS = {
+  // Request processing stages
+  REQUEST_RECEIVED: "request.received",
+  REQUEST_AUTHENTICATED: "request.authenticated",
+  REQUEST_AUTHORIZED: "request.authorized",
+  REQUEST_VALIDATED: "request.validated",
+  MUTATION_STARTED: "mutation.started",
+  TRANSACTION_STARTED: "transaction.started",
+  TRANSACTION_COMMITTED: "transaction.committed",
+  TRANSACTION_ROLLED_BACK: "transaction.rolled_back",
+  TRANSACTION_OUTCOME_UNKNOWN: "transaction.outcome_unknown",
+  BUSINESS_OPERATION_COMPLETED: "business.operation_completed",
+  HTTP_RESPONSE_SENT: "http.response_sent",
+
   // Item lifecycle events
   ITEM_CREATE_COMMITTED: "item.create.committed",
   ITEM_UPDATE_COMMITTED: "item.update.committed",
@@ -31,9 +44,10 @@ export const EVENTS = {
   IDEMPOTENCY_REPLAY: "idempotency.replay",
   IDEMPOTENCY_KEY_REUSED: "idempotency.key_reused",
 
-  // Transaction outcome events
-  TRANSACTION_COMMITTED: "transaction.committed",
-  TRANSACTION_ROLLED_BACK: "transaction.rolled_back",
+  // Activity/outbox events within transaction
+  ACTIVITY_INSERTED_IN_TRANSACTION: "activity.inserted_in_transaction",
+  OUTBOX_INSERTED_IN_TRANSACTION: "outbox.inserted_in_transaction",
+  IDEMPOTENCY_RECORD_WRITEN: "idempotency.record_written",
 
   // Outbox lifecycle events
   OUTBOX_JOB_ENQUEUED: "outbox.job.enqueued",
@@ -155,11 +169,50 @@ export function logTransactionOutcome(
 }
 
 /**
+ * Log a transaction started event.
+ */
+export function logTransactionStarted(
+  logger: Logger,
+  context: { requestId?: string; operation: string; itemId?: string; teamId?: string }
+): void {
+  logger.info("Transaction started", {
+    ...context,
+    event: "transaction.started",
+  });
+}
+
+/**
+ * Log an activity event inserted within transaction.
+ */
+export function logActivityInsertedInTransaction(
+  logger: Logger,
+  context: { requestId?: string; itemId?: string; eventType: string }
+): void {
+  logger.debug("Activity event inserted in transaction", {
+    ...context,
+    event: "activity.inserted_in_transaction",
+  });
+}
+
+/**
+ * Log an outbox job inserted within transaction.
+ */
+export function logOutboxInsertedInTransaction(
+  logger: Logger,
+  context: { requestId?: string; itemId?: string; jobType: string }
+): void {
+  logger.debug("Outbox job inserted in transaction", {
+    ...context,
+    event: "outbox.inserted_in_transaction",
+  });
+}
+
+/**
  * Log an outbox job lifecycle event.
  */
 export function logOutboxJobEvent(
   logger: Logger,
-  level: "info" | "warn" | "error",
+  level: "error" | "warn" | "info" | "debug",
   event: string,
   context: OutboxJobLogContext
 ): void {
@@ -209,5 +262,26 @@ export function logIdempotencyEvent(
   logger.log(level, "Idempotency event", {
     ...context,
     event: "idempotency." + event,
+  });
+}
+
+/**
+ * Log a business operation completion.
+ */
+export function logBusinessOperation(
+  logger: Logger,
+  context: {
+    requestId?: string;
+    operation: string;
+    itemId?: string;
+    teamId?: string;
+    userId?: string;
+    actorName?: string;
+    message: string;
+  }
+): void {
+  logger.info(context.message, {
+    ...context,
+    event: "business.operation_completed",
   });
 }

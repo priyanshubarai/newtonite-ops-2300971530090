@@ -5,7 +5,7 @@ import { db, type TxClient } from "../db/index.js";
 import { idempotencyRecords } from "../db/schema/idempotency_records.js";
 import { badRequest, conflict, ERROR_CODES } from "./errors.js";
 import { logger } from "../lib/logger.js";
-import { logTransactionOutcome, logIdempotencyEvent, type TransactionLogContext } from "../lib/events.js";
+import { logTransactionOutcome, logTransactionStarted, logIdempotencyEvent, type TransactionLogContext } from "../lib/events.js";
 
 /**
  * Database-backed idempotency for mutation endpoints.
@@ -103,6 +103,7 @@ export async function runIdempotentMutation(
   // No key: still run inside a transaction so the mutation, its activity event,
   // and its outbox job commit atomically.
   if (key === "") {
+    logTransactionStarted(logger, { requestId, operation });
     try {
       const result = await db.transaction(business);
       logTransactionOutcome(logger, {
@@ -142,6 +143,8 @@ export async function runIdempotentMutation(
   const scope = scopeFor(userId, operation);
   const requestHash = requestFingerprint(operation, req.params, payload);
   const expiresAt = new Date(Date.now() + RETENTION_MS);
+
+  logTransactionStarted(logger, { requestId, operation });
 
   const outcome = await db.transaction(async (tx) => {
     // 1. Serialize all requests sharing this (scope, key).

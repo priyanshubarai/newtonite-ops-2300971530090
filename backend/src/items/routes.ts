@@ -89,9 +89,11 @@ itemsRouter.post(
       throw badRequest("Invalid request body", parsed.error.flatten().fieldErrors);
     }
 
+    const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
+
     await runIdempotentMutation(req, res, OPERATIONS.create, parsed.data, async (tx) => ({
       status: 201,
-      body: await createItem(tx, req.user!.id, parsed.data),
+      body: await createItem(tx, req.user!.id, parsed.data, requestId),
     }));
   }),
 );
@@ -149,9 +151,11 @@ itemsRouter.post(
       throw badRequest("Invalid request body", parsed.error.flatten().fieldErrors);
     }
 
+    const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
+
     await runIdempotentMutation(req, res, OPERATIONS.comment, parsed.data, async (tx) => ({
       status: 201,
-      body: await createComment(tx, req.user!.id, id, parsed.data),
+      body: await createComment(tx, req.user!.id, id, parsed.data, requestId),
     }));
   }),
 );
@@ -168,9 +172,11 @@ itemsRouter.patch(
       throw badRequest("Invalid request body", parsed.error.flatten().fieldErrors);
     }
 
+    const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
+
     await runIdempotentMutation(req, res, OPERATIONS.update, parsed.data, async (tx) => ({
       status: 200,
-      body: await updateItem(tx, req.user!.id, id, parsed.data),
+      body: await updateItem(tx, req.user!.id, id, parsed.data, requestId),
     }));
   }),
 );
@@ -182,9 +188,11 @@ itemsRouter.post(
   asyncHandler(async (req, res) => {
     const id = requireItemId(req.params.id);
 
+    const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
+
     await runIdempotentMutation(req, res, OPERATIONS.claim, {}, async (tx) => ({
       status: 200,
-      body: await claimItem(tx, req.user!.id, id),
+      body: await claimItem(tx, req.user!.id, id, requestId),
     }));
   }),
 );
@@ -201,9 +209,11 @@ itemsRouter.post(
       throw badRequest("Invalid request body", parsed.error.flatten().fieldErrors);
     }
 
+    const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
+
     await runIdempotentMutation(req, res, OPERATIONS.transition, parsed.data, async (tx) => ({
       status: 200,
-      body: await transitionItem(tx, req.user!.id, id, parsed.data),
+      body: await transitionItem(tx, req.user!.id, id, parsed.data, requestId),
     }));
   }),
 );

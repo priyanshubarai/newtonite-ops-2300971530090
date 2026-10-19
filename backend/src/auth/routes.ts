@@ -8,6 +8,7 @@ import {
   findUserById,
   getMembershipsForUser,
 } from "./repository.js";
+import { logger } from "../lib/logger.js";
 
 export const authRouter = Router();
 
@@ -35,9 +36,11 @@ const loginSchema = z.object({
  * existence is never leaked.
  */
 authRouter.post("/login", (req, res) => {
+  const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
   void (async () => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
+      logger.debug("Login validation failed", { requestId, error: parsed.error.flatten().fieldErrors });
       return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten().fieldErrors });
     }
 
@@ -48,19 +51,23 @@ authRouter.post("/login", (req, res) => {
       // Burn comparable time on a dummy compare so a missing account and a
       // wrong password are indistinguishable by response timing.
       await verifyPassword(password, "$2b$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi");
+      logger.info("Login failed: user not found", { requestId, tag: "AUTH" });
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
     const passwordOk = await verifyPassword(password, user.passwordHash);
     if (!passwordOk) {
+      logger.info("Login failed: invalid password", { requestId, userId: user.id, tag: "AUTH" });
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
     if (!user.isActive) {
+      logger.info("Login failed: account inactive", { requestId, userId: user.id, tag: "AUTH" });
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
     const token = signAuthToken(user.id);
+    logger.info("Login successful", { requestId, userId: user.id, tag: "AUTH" });
     return res.status(200).json({
       token,
       tokenType: "Bearer",
@@ -72,8 +79,7 @@ authRouter.post("/login", (req, res) => {
     });
   })().catch((err) => {
     // Do not leak stack traces or SQL details to the client.
-    // eslint-disable-next-line no-console
-    console.error("login error");
+    logger.error("Login error", { requestId, error: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ error: "Internal server error" });
     void err;
   });
@@ -86,13 +92,16 @@ authRouter.post("/login", (req, res) => {
  * their team memberships (loaded fresh from the database, not from the token).
  */
 authRouter.get("/me", requireAuth, (req, res) => {
+  const requestId = (req as import("../lib/morgan.js").RequestWithId).requestId;
   void (async () => {
     const authUser = req.user!;
     const user = await findUserById(authUser.id);
     if (!user) {
+      logger.warn("Session validation failed: user not found", { requestId, userId: authUser.id, tag: "AUTH" });
       return res.status(401).json({ error: "Invalid or expired token" });
     }
     const memberships = await getMembershipsForUser(user.id);
+    logger.debug("Session validated", { requestId, userId: user.id, tag: "AUTH" });
     return res.status(200).json({
       user: {
         id: user.id,
@@ -103,8 +112,7 @@ authRouter.get("/me", requireAuth, (req, res) => {
       memberships,
     });
   })().catch((err) => {
-    // eslint-disable-next-line no-console
-    console.error("me error");
+    logger.error("Session validation error", { requestId, error: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ error: "Internal server error" });
     void err;
   });

@@ -27,7 +27,7 @@ const morganStream = {
     // Morgan includes a trailing newline; trim it.
     const trimmed = message.trim();
     if (trimmed) {
-      logger.http(trimmed);
+      logger.http(trimmed, { tag: "HTTP" });
     }
   },
 };
@@ -60,6 +60,7 @@ morgan.token("method-path", (req: express.Request) => {
 function shouldExcludeFromAccessLog(req: express.Request): boolean {
   // Exclude health check endpoints
   if (req.path === "/health") return true;
+  if (req.path === "/") return true;
   return false;
 }
 
@@ -82,6 +83,14 @@ export function requestIdMiddleware(req: express.Request, res: express.Response,
 
   // Set response header for client-side correlation
   res.setHeader("x-request-id", requestId);
+
+  // Log request received
+  logger.debug("Request received", {
+    tag: "REQUEST",
+    requestId,
+    method: req.method,
+    path: req.originalUrl?.split("?")[0] ?? req.path,
+  });
 
   next();
 }

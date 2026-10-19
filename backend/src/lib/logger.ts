@@ -43,13 +43,85 @@ function sanitizeMeta(meta: Record<string, unknown>): Record<string, string | nu
   return safe;
 }
 
-/** Format for development: human-readable, colorized. */
+/** Format for development: human-readable, colorized with structured tags. */
 const developmentFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss.SSS" }),
   winston.format.colorize({ all: true }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
-    return `${timestamp} [${level}]: ${message}${metaStr}`;
+    // Extract structured tags from meta
+    const tag = meta.tag ? `[${meta.tag}]` : "";
+    const requestId = meta.requestId ? ` request=${meta.requestId}` : "";
+    const jobId = meta.jobId ? ` job=${meta.jobId}` : "";
+    const itemId = meta.itemId ? ` item=${meta.itemId}` : "";
+    const userId = meta.userId ? ` user=${meta.userId}` : "";
+    const teamId = meta.teamId ? ` team=${meta.teamId}` : "";
+    const duration = meta.durationMs ? ` duration=${meta.durationMs}ms` : "";
+    const operation = meta.operation ? ` op=${meta.operation}` : "";
+    const eventType = meta.eventType ? ` type=${meta.eventType}` : "";
+    const attempt = meta.attempt !== undefined ? ` attempt=${meta.attempt}` : "";
+    const maxAttempts = meta.maxAttempts !== undefined ? ` max=${meta.maxAttempts}` : "";
+    const outcome = meta.outcome ? ` outcome=${meta.outcome}` : "";
+    const category = meta.category ? ` category=${meta.category}` : "";
+    const delayMs = meta.delayMs ? ` delay=${meta.delayMs}ms` : "";
+    const retryAt = meta.retryScheduledAt ? ` retryAt=${meta.retryScheduledAt}` : "";
+    const workerId = meta.workerId ? ` worker=${meta.workerId}` : "";
+    const status = meta.status ? ` status=${meta.status}` : "";
+    const method = meta.method ? ` method=${meta.method}` : "";
+    const path = meta.path ? ` path=${meta.path}` : "";
+    const code = meta.code ? ` code=${meta.code}` : "";
+    const statusCode = meta.statusCode ? ` statusCode=${meta.statusCode}` : "";
+    const businessChange = meta.businessChangeCommitted !== undefined ? ` business=${meta.businessChangeCommitted ? "committed" : "pending"}` : "";
+    const activityEvents = meta.activityEventsWritten !== undefined ? ` activity=${meta.activityEventsWritten}` : "";
+    const outboxJobs = meta.outboxJobsInserted !== undefined ? ` outbox=${meta.outboxJobsInserted}` : "";
+    const idempotency = meta.idempotencyRecordWritten !== undefined ? ` idempotency=${meta.idempotencyRecordWritten ? "written" : "none"}` : "";
+    const reclaimed = meta.reclaimed !== undefined ? ` reclaimed=${meta.reclaimed}` : "";
+    const exhausted = meta.exhausted !== undefined ? ` exhausted=${meta.exhausted}` : "";
+    const claimed = meta.claimed !== undefined ? ` claimed=${meta.claimed}` : "";
+    const processed = meta.processed !== undefined ? ` processed=${meta.processed}` : "";
+    const retried = meta.retried !== undefined ? ` retried=${meta.retried}` : "";
+    const failed = meta.failed !== undefined ? ` failed=${meta.failed}` : "";
+    const skipped = meta.skipped !== undefined ? ` skipped=${meta.skipped}` : "";
+    const leasesExhausted = meta.leasesExhausted !== undefined ? ` leasesExhausted=${meta.leasesExhausted}` : "";
+
+    // Build the structured message
+    const parts = [
+      tag,
+      message,
+      requestId,
+      jobId,
+      itemId,
+      userId,
+      teamId,
+      duration,
+      operation,
+      eventType,
+      attempt,
+      maxAttempts,
+      outcome,
+      category,
+      delayMs,
+      retryAt,
+      workerId,
+      status,
+      method,
+      path,
+      code,
+      statusCode,
+      businessChange,
+      activityEvents,
+      outboxJobs,
+      idempotency,
+      reclaimed,
+      exhausted,
+      claimed,
+      processed,
+      retried,
+      failed,
+      skipped,
+      leasesExhausted,
+    ].filter(Boolean);
+
+    return `${timestamp} ${level}: ${parts.join(" ")}`;
   })
 );
 
