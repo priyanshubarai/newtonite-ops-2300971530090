@@ -222,11 +222,6 @@ export function ItemsPage() {
             Track and resolve operational work across your teams.
           </p>
         </div>
-        {canCreate && (
-          <Link to="/items/new" className="button button--primary">
-            New work item
-          </Link>
-        )}
       </div>
 
       <form className="filters" onSubmit={(event) => event.preventDefault()} aria-label="Work item filters">

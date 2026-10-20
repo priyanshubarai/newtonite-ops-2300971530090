@@ -45,8 +45,10 @@ describe("ItemDetailPage", () => {
     await renderDetail(mock, item);
 
     expect(screen.getByText("Checkout error rate is elevated.")).toBeInTheDocument();
-    expect(screen.getByText("Payments")).toBeInTheDocument();
-    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+    // Scope to main content to avoid sidebar team names
+    const main = screen.getByRole("main");
+    expect(within(main).getByText("Payments")).toBeInTheDocument();
+    expect(within(main).getByText("Unassigned")).toBeInTheDocument();
     // Activity is now requested.
     expect(mock.calls.some((call) => call.path.includes("activity"))).toBe(true);
   });
