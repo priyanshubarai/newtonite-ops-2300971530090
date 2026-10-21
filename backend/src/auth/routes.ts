@@ -9,6 +9,7 @@ import {
   getMembershipsForUser,
 } from "./repository.js";
 import { logger } from "../lib/logger.js";
+import { env } from "../config/env.js";
 
 export const authRouter = Router();
 
@@ -31,7 +32,7 @@ const loginSchema = z.object({
  * POST /auth/login
  *
  * Accepts { email, password }. On success returns a short-lived bearer token
- * plus the safe user profile. Every failure mode - unknown email, wrong
+ * in an HttpOnly cookie plus the safe user profile. Every failure mode - unknown email, wrong
  * password, deactivated account - returns the same generic 401 so account
  * existence is never leaked.
  */
@@ -68,8 +69,18 @@ authRouter.post("/login", (req, res) => {
 
     const token = signAuthToken(user.id);
     logger.info("Login successful", { requestId, userId: user.id, tag: "AUTH" });
+    
+    // Set token in HttpOnly cookie
+    const isProduction = process.env.NODE_ENV === "production";
+    res.cookie("auth_token", token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "strict",
+      maxAge: env.JWT_EXPIRES_IN * 1000, // JWT_EXPIRES_IN is in seconds
+      path: "/",
+    });
+    
     return res.status(200).json({
-      token,
       tokenType: "Bearer",
       user: {
         id: user.id,
@@ -83,6 +94,21 @@ authRouter.post("/login", (req, res) => {
     res.status(500).json({ error: "Internal server error" });
     void err;
   });
+});
+
+/**
+ * POST /auth/logout
+ *
+ * Clears the auth cookie.
+ */
+authRouter.post("/logout", (req, res) => {
+  res.clearCookie("auth_token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  });
+  return res.status(200).json({ message: "Logged out successfully" });
 });
 
 /**

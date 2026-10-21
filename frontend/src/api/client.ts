@@ -1,4 +1,4 @@
-import { getToken } from "../auth/tokenStore";
+import { hasValidSession } from "../auth/tokenStore";
 import type { ApiErrorBody } from "./types";
 
 /**
@@ -9,11 +9,12 @@ import type { ApiErrorBody } from "./types";
  * the token themselves.
  *
  * Security notes:
- * - The bearer token is attached from the in-memory token store only; it is
- *   never written to localStorage/sessionStorage and never logged.
+ * - The token is stored in an HttpOnly cookie and sent automatically with
+ *   credentials. It is never written to localStorage/sessionStorage and never
+ *   logged.
  * - Response bodies are only parsed, never logged, so no sensitive payload is
  *   echoed to the console.
- * - A 401 on an *authenticated* request (one that carried a token) clears the
+ * - A 401 on an *authenticated* request (one that carried a cookie) clears the
  *   session via the registered handler, returning the user to the login screen.
  *   A 401 on an unauthenticated request (e.g. a bad login) does not, because
  *   that is an expected application error rather than a session expiry.
@@ -132,9 +133,8 @@ async function readErrorBody(res: Response): Promise<ApiErrorBody | null> {
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, query, idempotencyKey, signal, auth = true } = options;
 
-  const token = auth ? getToken() : null;
+  const hasSession = auth ? hasValidSession() : false;
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (auth && token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
@@ -145,6 +145,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     res = await fetch(url, {
       method,
       headers,
+      credentials: "include",
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     });
@@ -156,7 +157,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   if (!res.ok) {
-    if (res.status === 401 && token) unauthorizedHandler?.();
+    if (res.status === 401 && hasSession) unauthorizedHandler?.();
     const errorBody = await readErrorBody(res);
     throw new ApiError(
       res.status,

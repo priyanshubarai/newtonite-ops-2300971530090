@@ -4,8 +4,10 @@ import { findUserById } from "./repository.js";
 
 /**
  * Express middleware factory that authenticates a request via a short-lived bearer
- * token. On success it attaches the freshly-loaded user to `req.user`. On any
- * failure it responds 401 and does not call the next handler.
+ * token. The token can be sent either in the Authorization header (Bearer) or
+ * in an HttpOnly cookie named "auth_token". On success it attaches the
+ * freshly-loaded user to `req.user`. On any failure it responds 401 and does
+ * not call the next handler.
  *
  * The authenticated user id comes only from the verified token's `sub` claim -
  * never from a client-supplied id in the body, query, or headers. The user is
@@ -14,12 +16,16 @@ import { findUserById } from "./repository.js";
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   void (async () => {
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Authentication required" });
+    // Try to get token from cookie first, then fall back to Authorization header
+    let token = req.cookies?.auth_token;
+    
+    if (!token) {
+      const header = req.headers.authorization;
+      if (header && header.startsWith("Bearer ")) {
+        token = header.slice("Bearer ".length).trim();
+      }
     }
-
-    const token = header.slice("Bearer ".length).trim();
+    
     if (!token) {
       return res.status(401).json({ error: "Authentication required" });
     }

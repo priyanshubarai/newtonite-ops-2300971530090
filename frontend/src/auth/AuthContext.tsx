@@ -11,15 +11,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchMe } from "../api/auth";
 import { setUnauthorizedHandler } from "../api/client";
 import type { AuthUser, Membership } from "../api/types";
-import { clearToken, getToken, initializeToken, setToken, subscribeToken } from "./tokenStore";
+import { clearSession, hasValidSession, initializeToken, setSession, subscribeToken } from "./tokenStore";
 
 /**
  * Session state for the whole app.
  *
- * The token lives in `tokenStore` (persisted to localStorage). This provider
- * derives the current user + memberships from `GET /auth/me` whenever a token
- * is present, and wires the API client's 401 handler to drop the session so an
- * expired token sends the user back to the login screen.
+ * The token lives in an HttpOnly cookie (set by the backend). This provider
+ * tracks whether we have a valid session via a localStorage flag and derives
+ * the current user + memberships from `GET /auth/me` whenever a session flag
+ * is present. The API client's 401 handler drops the session so an expired
+ * token sends the user back to the login screen.
  */
 
 export type SessionStatus = "anonymous" | "loading" | "authenticated" | "error";
@@ -28,8 +29,8 @@ export interface AuthContextValue {
   status: SessionStatus;
   user: AuthUser | null;
   memberships: Membership[];
-  /** Store a token obtained from `/auth/login`. */
-  signIn: (token: string) => void;
+  /** Mark the session as active (called after successful login). */
+  signIn: () => void;
   /** Clear client-held session state. */
   signOut: () => void;
   /** Retry loading the session after a transient failure. */
@@ -39,22 +40,19 @@ export interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const token = useSyncExternalStore(subscribeToken, getToken, getToken);
+  const hasSession = useSyncExternalStore(subscribeToken, hasValidSession, hasValidSession);
   const queryClient = useQueryClient();
 
-  // The token is hydrated synchronously by `tokenStore` at module load, so there
-  // is no "storage not read yet" window after this. This call reconciles the
-  // in-memory value with storage on mount, which matters if storage changed
-  // outside this module (another tab, a test writing localStorage directly).
+  // The session flag is hydrated synchronously by `tokenStore` at module load.
   useEffect(() => {
     initializeToken();
   }, []);
 
   // Any authenticated request answered with 401 means the session is no longer
-  // valid: clear the token and drop cached server state.
+  // valid: clear the session flag and drop cached server state.
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      clearToken();
+      clearSession();
       queryClient.clear();
     });
     return () => setUnauthorizedHandler(null);
@@ -63,19 +61,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const meQuery = useQuery({
     queryKey: ["me"],
     queryFn: ({ signal }) => fetchMe(signal),
-    enabled: token !== null,
+    enabled: hasSession,
     retry: false,
     staleTime: 30_000,
   });
 
   const { isPending, isError, data, refetch } = meQuery;
 
-  const signIn = useCallback((next: string) => {
-    setToken(next);
+  const signIn = useCallback(() => {
+    setSession(true);
   }, []);
 
   const signOut = useCallback(() => {
-    clearToken();
+    clearSession();
     queryClient.clear();
   }, [queryClient]);
 
@@ -86,11 +84,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => {
     let status: SessionStatus;
     // Order matters. "anonymous" is a positive statement (there is definitely no
-    // token), so it is decided only from `token === null`. A token being present
-    // but `/auth/me` still in flight is "loading", which the guard renders as a
-    // loading state rather than a redirect — that is what stops a valid session
-    // from being bounced to /login while its user is still being fetched.
-    if (token === null) status = "anonymous";
+    // session), so it is decided only from `hasSession === false`. A session flag
+    // being present but `/auth/me` still in flight is "loading", which the guard
+    // renders as a loading state rather than a redirect — that is what stops a
+    // valid session from being bounced to /login while its user is still being fetched.
+    if (!hasSession) status = "anonymous";
     else if (isPending) status = "loading";
     else if (isError) status = "error";
     else status = "authenticated";
@@ -103,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       reloadSession,
     };
-  }, [token, isPending, isError, data, signIn, signOut, reloadSession]);
+  }, [hasSession, isPending, isError, data, signIn, signOut, reloadSession]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
