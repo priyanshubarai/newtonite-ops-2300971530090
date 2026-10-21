@@ -144,6 +144,7 @@ export function ItemDetailPage() {
     mutationFn: (body: string) => createComment(id, { body }, commentKey),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["comments", id] });
+      queryClient.invalidateQueries({ queryKey: ["activity", id] });
       setActionError(null);
       setActionMessage("Comment added.");
       reticleSignal("comment.created", { itemId: id, commentId: response?.comment?.id });
@@ -582,6 +583,14 @@ function renderEventDetails(event: { eventType: string; metadata: Record<string,
           {changedKeys.map((key) => (
             <div key={key}><dt>{key}</dt><dd>{before[key] as string} → {after[key] as string}</dd></div>
           ))}
+        </dl>
+      );
+    }
+    case "COMMENT_ADDED": {
+      return (
+        <dl className="activity-details">
+          <div><dt>Comment ID</dt><dd>{metadata.commentId as string}</dd></div>
+          <div><dt>By</dt><dd>User {metadata.authorId as string}</dd></div>
         </dl>
       );
     }

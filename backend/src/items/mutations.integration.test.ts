@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { app } from "../app.js";
 import { db, pool } from "../db/index.js";
 import { workItems } from "../db/schema/work_items.js";
+import { comments } from "../db/schema/comments.js";
 import {
   insertActivityEventTx,
   insertOutboxJobTx,
@@ -142,11 +143,30 @@ function createItem(token: string, body: Record<string, unknown>, key?: string) 
   return req.send(body);
 }
 
+function createComment(
+  id: string,
+  token: string,
+  body: Record<string, unknown>,
+  key?: string,
+) {
+  const req = request(app).post(`/items/${id}/comments`).set(authed(token));
+  if (key) req.set("Idempotency-Key", key);
+  return req.send(body);
+}
+
 async function countItemsByTitle(teamId: string, title: string): Promise<number> {
   const rows = await db
     .select({ value: sql<number>`count(*)::int` })
     .from(workItems)
     .where(and(eq(workItems.teamId, teamId), eq(workItems.title, title)));
+  return rows[0]?.value ?? 0;
+}
+
+async function countComments(workItemId: string): Promise<number> {
+  const rows = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(comments)
+    .where(eq(comments.workItemId, workItemId));
   return rows[0]?.value ?? 0;
 }
 
@@ -786,5 +806,93 @@ describe("Transactional activity + outbox consistency", () => {
     expect(row?.version).toBe(1);
     expect(row?.status).toBe("OPEN");
     expect(row?.assigneeId).toBeNull();
+  });
+
+  // Comment creation and activity events
+  it("29. create comment creates one comment and one COMMENT_ADDED activity event", async () => {
+    const id = await freshItem();
+    const key = uniqueIdempotencyKey();
+
+    const res = await createComment(id, tokens.memberA, { body: "Test comment" }, key);
+    expect(res.status).toBe(201);
+
+    expect(await countComments(id)).toBe(1);
+    expect(await countActivityEvents(id)).toBe(1);
+
+    const activity = await listActivityEvents(id);
+    expect(activity).toHaveLength(1);
+    expect(activity[0].eventType).toBe("COMMENT_ADDED");
+    expect(activity[0].metadata).toEqual({ commentId: res.body.comment.id, authorId: fx.memberA });
+  });
+
+  it("30. second comment creates its own activity event", async () => {
+    const id = await freshItem();
+    const key1 = uniqueIdempotencyKey();
+    const key2 = uniqueIdempotencyKey();
+
+    const res1 = await createComment(id, tokens.memberA, { body: "First comment" }, key1);
+    expect(res1.status).toBe(201);
+
+    const res2 = await createComment(id, tokens.memberA, { body: "Second comment" }, key2);
+    expect(res2.status).toBe(201);
+
+    expect(await countComments(id)).toBe(2);
+    expect(await countActivityEvents(id)).toBe(2);
+
+    const activity = await listActivityEvents(id);
+    expect(activity).toHaveLength(2);
+    // Both should be COMMENT_ADDED
+    expect(activity.every((a) => a.eventType === "COMMENT_ADDED")).toBe(true);
+    // Different comment IDs
+    expect(activity[0].metadata.commentId).not.toBe(activity[1].metadata.commentId);
+  });
+
+  it("31. activity endpoint returns COMMENT_ADDED events for the work item", async () => {
+    const id = await freshItem();
+    const key = uniqueIdempotencyKey();
+
+    await createComment(id, tokens.memberA, { body: "Comment for activity test" }, key);
+
+    const res = await request(app).get(`/items/${id}/activity`).set(authed(tokens.memberA));
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].eventType).toBe("COMMENT_ADDED");
+    expect(res.body.items[0].metadata).toEqual({ commentId: expect.any(String), authorId: fx.memberA });
+  });
+
+  it("32. retrying same idempotent comment request does not duplicate comment or activity", async () => {
+    const id = await freshItem();
+    const key = uniqueIdempotencyKey();
+    const body = { body: "Idempotent comment" };
+
+    const res1 = await createComment(id, tokens.memberA, body, key);
+    expect(res1.status).toBe(201);
+
+    const res2 = await createComment(id, tokens.memberA, body, key);
+    expect(res2.status).toBe(201);
+    expect(res2.body).toEqual(res1.body);
+
+    expect(await countComments(id)).toBe(1);
+    expect(await countActivityEvents(id)).toBe(1);
+  });
+
+  it("33. failed comment creation does not leave orphan activity events", async () => {
+    const id = await freshItem();
+    const key = uniqueIdempotencyKey();
+
+    // Post to a different team (unauthorized) - should fail
+    const badBody = { body: "Unauthorized comment" };
+    const res = await createComment(id, tokens.memberB, badBody, key);
+    expect(res.status).toBe(404);
+
+    expect(await countComments(id)).toBe(0);
+    expect(await countActivityEvents(id)).toBe(0);
+
+    // The key was not consumed by the failure: a valid payload under it works
+    const good = await createComment(id, tokens.memberA, { body: "Valid comment" }, key);
+    expect(good.status).toBe(201);
+
+    expect(await countComments(id)).toBe(1);
+    expect(await countActivityEvents(id)).toBe(1);
   });
 });
