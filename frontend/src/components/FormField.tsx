@@ -53,9 +53,10 @@ export function FormField({
   // If direct children, we need to spread the field props onto the first child element
   let finalChildren = renderedChildren;
   if (typeof children !== "function" && React.isValidElement(renderedChildren)) {
-    finalChildren = React.cloneElement(renderedChildren as React.ReactElement, {
+    const childProps = (renderedChildren as React.ReactElement<any>).props;
+    finalChildren = React.cloneElement(renderedChildren, {
       ...fieldProps,
-      ...(renderedChildren as React.ReactElement).props,
+      ...childProps,
     });
   }
 

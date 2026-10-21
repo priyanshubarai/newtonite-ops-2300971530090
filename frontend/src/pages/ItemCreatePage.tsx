@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createItem } from "../api/items";
 import type { CreateItemInput } from "../api/types";
 import { useStableIdempotencyKey } from "../api/idempotency";
+import { reticleSignal } from "../lib/reticleSignal";
 import { useAuth } from "../auth/AuthContext";
 import { Alert } from "../components/Alert";
 import {
@@ -47,6 +48,7 @@ export function ItemCreatePage() {
     mutationFn: (payload: CreateItemInput) => createItem(payload, idempotencyKey),
     onSuccess: (item) => {
       void queryClient.invalidateQueries({ queryKey: ["items"] });
+      reticleSignal("item.created", { id: item.id, status: item.status });
       navigate(`/items/${item.id}`, {
         replace: true,
         state: { flash: "Work item created." },

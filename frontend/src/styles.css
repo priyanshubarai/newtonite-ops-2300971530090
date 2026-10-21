@@ -1,39 +1,97 @@
 /* ==========================================================================
-   Newtonite Operations - application styles
-   A small, hand-written system: design tokens, layout primitives, and the
-   handful of components the dashboard needs. No UI framework.
+   Tailwind v4
+   Imported FIRST so the hand-written design system below wins every
+   equal-specificity conflict (both are single-class selectors; source order
+   decides). Preflight's resets are re-established by the "Design system
+   preflight guards" block at the end of this file.
    ========================================================================== */
+@import "tailwindcss";
+
+/* Design tokens exposed to Tailwind's utility generator. v4 emits these into
+   :root, so the `:root` block below only declares what is NOT a color/font
+   (layout, motion, radius, spacing, z-index). */
+@theme {
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-surface-pressed: #ebeef2;
+  --color-border: #d1d1d6;
+  --color-border-strong: #a8a8ad;
+  --color-text: #131315;
+  --color-text-secondary: #5a5a5e;
+  --color-text-tertiary: #8e8e93;
+
+  --color-primary: #0066cc;
+  --color-primary-hover: #005ab5;
+  --color-primary-pressed: #004a99;
+  --color-primary-contrast: #ffffff;
+  --color-focus: #0066cc;
+
+  --color-danger: #d12d2d;
+  --color-danger-bg: #fef2f2;
+  --color-warning: #a05a00;
+  --color-warning-bg: #fffbf0;
+  --color-success: #28803d;
+  --color-success-bg: #f0fdf4;
+  --color-info: #0066cc;
+  --color-info-bg: #eff6ff;
+}
+
+/* ==========================================================================
+   Premium Font - Geist (self-hosted)
+   ========================================================================== */
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/Geist-Regular.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  font-stretch: 25% 151%;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/GeistMono-Regular.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  font-stretch: 25% 151%;
+}
 
 :root {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Typography and colors are declared in @theme above (emitted to :root by
+     Tailwind). Only non-color tokens live here. */
 
-  --color-bg: #f4f6fb;
-  --color-surface: #ffffff;
-  --color-surface-2: #f8fafc;
-  --color-border: #d6dbe6;
-  --color-border-strong: #b3bccd;
-  --color-text: #1b2333;
-  --color-text-muted: #5b6579;
+  /* Materials - Translucent layers with refined opacity */
+  --material-thin: rgba(255, 255, 255, 0.65);
+  --material-regular: rgba(255, 255, 255, 0.8);
+  --material-thick: rgba(255, 255, 255, 0.92);
+  --material-border: rgba(19, 19, 21, 0.05);
 
-  --color-primary: #2f4bd6;
-  --color-primary-hover: #2438a8;
-  --color-primary-contrast: #ffffff;
-  --color-focus: #1d4ed8;
+  /* Shadows - Layered depth with subtle tinting */
+  --shadow-xs: 0 1px 2px rgba(19, 19, 21, 0.03);
+  --shadow-sm: 0 2px 8px rgba(19, 19, 21, 0.05);
+  --shadow-md: 0 8px 24px rgba(19, 19, 21, 0.07);
+  --shadow-lg: 0 16px 48px rgba(19, 19, 21, 0.09);
+  --shadow-xl: 0 24px 64px rgba(19, 19, 21, 0.11);
+  --shadow-inner: inset 0 1px 1px rgba(255, 255, 255, 0.6);
+  --shadow-inner-strong: inset 0 2px 4px rgba(255, 255, 255, 0.8);
 
-  --color-danger: #b3261e;
-  --color-danger-bg: #fdecea;
-  --color-warning: #8a5000;
-  --color-warning-bg: #fff4e0;
-  --color-success: #1d6b3f;
-  --color-success-bg: #e7f6ec;
-  --color-info: #1b4f8a;
-  --color-info-bg: #e8f1fd;
+  /* Radius - Unified squircle-inspired scale */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-full: 9999px;
 
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow-md: 0 4px 16px rgba(16, 24, 40, 0.08);
+  /* Spacing - Generous scale with more granularity */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -42,61 +100,37 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+  --space-9: 96px;
+  --space-10: 128px;
 
-  --sidebar-width: 260px;
+  /* Layout */
+  --sidebar-width: 280px;
   --sidebar-collapsed-width: 64px;
   --header-height: 56px;
-  --transition-fast: 150ms ease;
-  --transition-normal: 200ms ease;
+  --max-width: 1400px;
 
-  --max-width: 1200px;
+  /* Motion - Spring physics (CSS transitions only) */
+  --spring-gentle: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-page: 400ms;
+
+  /* Z-index system */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-sidebar: 300;
+  --z-overlay: 400;
+  --z-modal: 500;
+  --z-toast: 600;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #10141c;
-    --color-surface: #171d28;
-    --color-surface-2: #1d2532;
-    --color-border: #2c3646;
-    --color-border-strong: #3d4a5e;
-    --color-text: #eef2f8;
-    --color-text-muted: #a3aec2;
-
-    --color-primary: #7d95ff;
-    --color-primary-hover: #9dadff;
-    --color-primary-contrast: #0d1220;
-    --color-focus: #93a8ff;
-
-    --color-danger: #ff9d94;
-    --color-danger-bg: #3a1c1a;
-    --color-warning: #ffc272;
-    --color-warning-bg: #3a2a10;
-    --color-success: #86e0a8;
-    --color-success-bg: #14301f;
-    --color-info: #9dc4ff;
-    --color-info-bg: #14263c;
-
-    --sidebar-bg: var(--color-surface);
-    --sidebar-border: var(--color-border);
-    --sidebar-text: var(--color-text);
-    --sidebar-text-muted: var(--color-text-muted);
-    --sidebar-hover: var(--color-surface-2);
-    --sidebar-active: var(--color-info-bg);
-    --sidebar-active-text: var(--color-info);
-  }
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --sidebar-bg: var(--color-surface);
-    --sidebar-border: var(--color-border);
-    --sidebar-text: var(--color-text);
-    --sidebar-text-muted: var(--color-text-muted);
-    --sidebar-hover: var(--color-surface-2);
-    --sidebar-active: var(--color-info-bg);
-    --sidebar-active-text: var(--color-info);
-  }
-}
+/* ==========================================================================
+   Reset & Base
+   ========================================================================== */
 
 *,
 *::before,
@@ -106,6 +140,9 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
@@ -115,26 +152,44 @@ body {
   line-height: 1.5;
   color: var(--color-text);
   background: var(--color-bg);
+  min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-h1,
-h2,
-h3 {
-  line-height: 1.25;
+h1, h2, h3, h4, h5, h6 {
+  line-height: 1.15;
   margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
 }
 
 a {
   color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--spring-gentle);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+  text-decoration: none;
 }
 
 :focus-visible {
-  outline: 3px solid var(--color-focus);
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* Utilities ---------------------------------------------------------------- */
+/* Selection colors */
+::selection {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
 
 .visually-hidden {
   position: absolute;
@@ -148,355 +203,302 @@ a {
   border: 0;
 }
 
-.muted {
-  color: var(--color-text-muted);
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-}
-
-.text-danger {
-  color: var(--color-danger);
-  font-weight: 600;
-}
-
 .skip-link {
   position: absolute;
   left: -9999px;
   top: 0;
-  z-index: 100;
+  z-index: var(--z-toast);
   background: var(--color-surface);
   color: var(--color-text);
   padding: var(--space-3) var(--space-4);
-  border-radius: 0 0 var(--radius) 0;
+  border-radius: 0 0 var(--radius-lg) 0;
   box-shadow: var(--shadow-md);
+  font-weight: 500;
 }
 
 .skip-link:focus {
   left: 0;
 }
 
-/* Shell -------------------------------------------------------------------- */
+/* ==========================================================================
+   Typography Scale - Optical Sizing with Geist
+   ========================================================================== */
+
+.text-display {
+  font-size: clamp(2.75rem, 5.5vw, 4.5rem);
+  line-height: 1.0;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  font-optical-sizing: auto;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.text-h1 {
+  font-size: clamp(2rem, 3.5vw, 3rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  font-optical-sizing: auto;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.text-h2 {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  font-optical-sizing: auto;
+}
+
+.text-h3 {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  font-optical-sizing: auto;
+}
+
+.text-h4 {
+  font-size: 1rem;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  font-optical-sizing: auto;
+}
+
+.text-body {
+  font-size: 1rem;
+  line-height: 1.65;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-optical-sizing: auto;
+}
+
+.text-body-sm {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-optical-sizing: auto;
+}
+
+.text-caption {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  font-weight: 400;
+  font-optical-sizing: auto;
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.text-eyebrow {
+  font-size: 0.625rem;
+  line-height: 1;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-tertiary {
+  color: var(--color-text-tertiary);
+}
+
+.text-muted {
+  color: var(--color-text-tertiary);
+}
+
+/* Link styles within text */
+.text-body a,
+.text-body-sm a {
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.text-body a:hover,
+.text-body-sm a:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   Layout Shell
+   ========================================================================== */
 
 .app-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  /* Single source of truth for the horizontal offset of everything that sits
+     beside the fixed sidebar. The value is driven by the modifier classes below
+     rather than by an inline style, because an inline custom property outranks
+     the stylesheet and would keep the desktop offset applied at narrow widths,
+     pushing the content off-screen instead of letting the sidebar become a
+     drawer. */
+  --sidebar-current-width: var(--sidebar-width);
 }
 
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
+.app-shell--collapsed {
+  --sidebar-current-width: var(--sidebar-collapsed-width);
 }
 
-.app-header__inner {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: var(--space-3) var(--space-4);
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.app-header__menu {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: transparent;
-  color: var(--color-text);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.app-header__menu:hover {
-  background: var(--color-surface-2);
-}
-
-.app-header__brand {
-  font-weight: 700;
-  font-size: 1.05rem;
-  text-decoration: none;
-  color: var(--color-text);
-  white-space: nowrap;
-}
-
-.app-header__brand-sub {
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-.app-header__search {
-  position: relative;
-  flex: 1 1 300px;
-  max-width: 480px;
-  display: none;
-}
-
-.app-header__search-icon {
-  position: absolute;
-  left: var(--space-3);
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-muted);
-  pointer-events: none;
-}
-
-.app-header__search-input {
-  width: 100%;
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.app-header__search-input:focus {
-  outline: none;
-  border-color: var(--color-focus);
-  box-shadow: 0 0 0 3px var(--color-focus);
-}
-
-.app-header__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-left: auto;
-}
-
-.app-header__new-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.app-header__user {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.app-header__identity {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-  text-align: right;
-}
-
-.app-header__name {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.app-header__email {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
-.app-header__teams {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--color-border);
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.app-header__team-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-weight: 500;
-}
-
-.app-main {
-  flex: 1 1 auto;
-  width: 100%;
-  margin-left: var(--sidebar-width);
-  transition: margin-left var(--transition-normal);
-}
-
-/* Page --------------------------------------------------------------------- */
-
-.page {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-/* Responsive --------------------------------------------------------------- */
-
-@media (max-width: 1024px) {
-  .app-sidebar {
-    transform: translateX(-100%);
-  }
-
-  .app-sidebar--open {
-    transform: translateX(0);
-  }
-
-  .app-sidebar-overlay {
-    display: block;
-  }
-
-  .app-header__menu {
-    display: flex;
-  }
-
-  .app-header__search {
-    display: block;
-  }
-
-  .app-main {
-    margin-left: 0;
-  }
-}
-
-@media (max-width: 640px) {
-  .app-header__identity {
-    display: none;
-  }
-
-  .app-header__new-item span {
-    display: none;
-  }
-
-  .app-header__teams {
-    display: none;
-  }
-
-  .page {
-    padding: var(--space-4) var(--space-3) var(--space-5);
-  }
-
-  .page__title {
-    font-size: 1.3rem;
-  }
-
-  .table-wrap {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-  }
-
-  .filters__grid {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-/* Sidebar -------------------------------------------------------------------- */
-
+/* Sidebar */
 .app-sidebar-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 40;
+  background: rgba(19, 19, 21, 0.35);
+  backdrop-filter: blur(8px);
+  z-index: var(--z-overlay);
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--spring-gentle);
+  /* Rendered as a <button> so it is keyboard-reachable; strip the UA chrome. */
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.app-sidebar-overlay--visible {
+  display: block;
+  opacity: 1;
 }
 
 .app-sidebar {
   position: fixed;
   top: 0;
   left: 0;
+  /* `100dvh` so the bottom profile is not hidden behind mobile browser chrome;
+     the `100vh` fallback covers engines without dynamic viewport units. */
   height: 100vh;
+  height: 100dvh;
   width: var(--sidebar-width);
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
-  z-index: 50;
+  background: var(--material-regular);
+  border-right: 1px solid var(--material-border);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
-  transition: transform var(--transition-normal);
+  /* Keeps the last nav row and the profile clear of the home indicator. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transition: width var(--duration-normal) var(--spring-gentle), transform var(--duration-normal) var(--spring-gentle);
 }
 
-.app-sidebar--open {
-  transform: translateX(0);
+.app-sidebar--collapsed {
+  width: var(--sidebar-collapsed-width);
 }
 
-.app-sidebar__inner {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+/* Header, scrolling middle, and bottom profile. Only the middle scrolls, so
+   the profile stays anchored whether the nav list is short or long. */
+.app-sidebar__header,
+.app-sidebar__scroll,
+.sidebar-profile {
+  flex-shrink: 0;
+}
+
+.app-sidebar__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4);
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-4) var(--space-4);
 }
 
 .app-sidebar__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-2);
-  margin-bottom: var(--space-4);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--material-border);
+}
+
+/* Collapsed: the header becomes a centred column so the brand mark and the
+   collapse control each sit on the rail's centre line. Alignment comes from
+   the layout container — no margins or transforms doing the centring. */
+.app-sidebar--collapsed .app-sidebar__header {
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  padding-inline: 0;
+}
+
+.app-sidebar__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
 }
 
 .app-sidebar__brand {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   text-decoration: none;
-  color: var(--sidebar-text);
+  color: var(--color-text);
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  letter-spacing: -0.02em;
+  /* `min-width: 0` lets the title truncate at its own ellipsis rather than
+     overflowing the header box and colliding with the collapse control. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Collapsed: a fixed-size mark, centred in whatever width remains. */
+.app-sidebar__brand--mark {
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: visible;
 }
 
 .app-sidebar__brand-sub {
   font-weight: 500;
-  color: var(--sidebar-text-muted);
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
 }
 
 .app-sidebar__close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
   background: transparent;
-  color: var(--sidebar-text-muted);
-  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  border-radius: var(--radius-md);
   cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
 }
 
 .app-sidebar__close:hover {
-  background: var(--sidebar-hover);
-  color: var(--sidebar-text);
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
 }
 
+.app-sidebar__close:active {
+  transform: scale(0.95);
+}
+
+/* Main Navigation */
 .sidebar-nav-main {
   margin-bottom: var(--space-6);
-}
-
-.sidebar-section {
-  margin-bottom: var(--space-6);
-}
-
-.sidebar-section__header {
-  padding: 0 var(--space-2) var(--space-2);
-}
-
-.sidebar-section__title {
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sidebar-text-muted);
 }
 
 .sidebar-nav {
@@ -512,40 +514,43 @@ a {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
   text-decoration: none;
-  color: var(--sidebar-text);
+  color: var(--color-text-secondary);
   font-weight: 500;
-  font-size: 0.9rem;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  font-size: 0.9375rem;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+  white-space: nowrap;
 }
 
-.sidebar-nav__link:hover {
-  background: var(--sidebar-hover);
-  color: var(--sidebar-text);
-}
+/* Hover and :active for these links live in the gated block with the other
+   pointer affordances, near the end of this file. */
 
 .sidebar-nav__link--active {
-  background: var(--sidebar-active);
-  color: var(--sidebar-active-text);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  box-shadow: var(--shadow-sm);
 }
 
 .sidebar-nav__link--active:hover {
-  background: var(--sidebar-active);
-  color: var(--sidebar-active-text);
+  background: var(--color-primary-hover);
+  color: var(--color-primary-contrast);
 }
 
 .sidebar-nav__icon {
   display: flex;
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  color: var(--sidebar-text-muted);
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-tertiary);
+  transition: color var(--duration-fast) var(--spring-gentle);
 }
 
 .sidebar-nav__link--active .sidebar-nav__icon {
-  color: var(--sidebar-active-text);
+  color: var(--color-primary-contrast);
 }
 
 .sidebar-nav__label {
@@ -554,9 +559,29 @@ a {
   white-space: nowrap;
 }
 
+/* Teams Section */
+.sidebar-section {
+  margin-bottom: var(--space-8);
+}
+
+.sidebar-section__header {
+  padding: 0 var(--space-3) var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-section__title {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-tertiary);
+}
+
 .sidebar-team {
-  border: 1px solid var(--sidebar-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-surface);
 }
@@ -566,48 +591,51 @@ a {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: transparent;
   border: none;
-  color: var(--sidebar-text);
+  color: var(--color-text);
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.9375rem;
   text-align: left;
   cursor: pointer;
   gap: var(--space-2);
+  transition: background var(--duration-fast) var(--spring-gentle);
 }
 
 .sidebar-team__toggle:hover {
-  background: var(--sidebar-hover);
+  background: var(--color-surface-pressed);
+}
+
+.sidebar-team__toggle:active {
+  background: var(--color-border);
 }
 
 .sidebar-team__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
 .sidebar-team__role {
-  font-size: 0.65rem;
+  font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--sidebar-text-muted);
-  background: var(--color-surface-2);
-  padding: 2px 6px;
-  border-radius: 999px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-pressed);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
-}
-
-.sidebar-team__toggle--active .sidebar-team__role {
-  background: var(--sidebar-active);
-  color: var(--sidebar-active-text);
 }
 
 .sidebar-team__chevron {
   flex-shrink: 0;
-  color: var(--sidebar-text-muted);
-  transition: transform var(--transition-fast);
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--duration-normal) var(--spring-gentle);
 }
 
 .sidebar-team__toggle--expanded .sidebar-team__chevron {
@@ -618,43 +646,59 @@ a {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--sidebar-border);
-  background: var(--color-surface-2);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-pressed);
   max-height: 0;
   overflow: hidden;
-  transition: max-height var(--transition-normal), padding var(--transition-fast);
+  /* `max-height: 0` alone hides the links visually but leaves them in the
+     accessibility tree and tab order, so an unexpanded team still announced
+     four links (and screen readers could focus them). `visibility` removes
+     them from both, and it is animatable. */
+  visibility: hidden;
+  transition:
+    max-height var(--duration-normal) var(--spring-gentle),
+    visibility 0s linear var(--duration-normal),
+    padding var(--duration-fast) var(--spring-gentle);
 }
 
 .sidebar-subnav--open {
-  max-height: 200px;
+  /* Four subnav links (the LEAD/ADMIN teams render all four) are ~184px; the
+     old 200px cap clipped the last row mid-animation. */
+  max-height: 320px;
   padding: var(--space-2) 0;
+  visibility: visible;
+  transition:
+    max-height var(--duration-normal) var(--spring-gentle),
+    visibility 0s linear 0s,
+    padding var(--duration-fast) var(--spring-gentle);
 }
 
 .sidebar-subnav__link {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-5);
   text-decoration: none;
-  color: var(--sidebar-text);
+  color: var(--color-text-secondary);
   font-weight: 500;
-  font-size: 0.85rem;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  font-size: 0.875rem;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+  white-space: nowrap;
 }
 
-.sidebar-subnav__link:hover {
-  background: var(--sidebar-hover);
-  color: var(--sidebar-text);
-}
+/* Hover and :active for these links live in the gated block with the other
+   pointer affordances, near the end of this file. */
 
 .sidebar-subnav__link--active {
-  background: var(--sidebar-active);
-  color: var(--sidebar-active-text);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
 }
 
 .sidebar-subnav__link--active:hover {
-  background: var(--sidebar-active);
-  color: var(--sidebar-active-text);
+  background: var(--color-primary-hover);
+  color: var(--color-primary-contrast);
 }
 
 .sidebar-subnav__icon {
@@ -662,268 +706,1184 @@ a {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  color: var(--sidebar-text-muted);
+  color: var(--color-text-tertiary);
+  transition: color var(--duration-fast) var(--spring-gentle);
 }
 
 .sidebar-subnav__link--active .sidebar-subnav__icon {
-  color: var(--sidebar-active-text);
+  color: var(--color-primary-contrast);
 }
 
-/* Page --------------------------------------------------------------------- */
+/* Sidebar collapse/expand control — lives in the sidebar header, beside the
+   brand title, and flips direction from one button rather than two.
+   A consistent 40x40 footprint in BOTH states: at 36px it overflowed the
+   64px rail's content box once the header padding was subtracted, which is
+   what pushed it off centre when collapsed. 40px also matches the collapsed
+   navigation square below, so the rail reads as one column. */
+.app-sidebar__collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+}
 
-.page {
+.app-sidebar__collapse:hover {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+.app-sidebar__collapse:active {
+  transform: scale(0.95);
+}
+
+/* Collapsed navigation: a fixed 40x40 rounded square, centred in the 64px rail
+   (12px of margin per side). Labels stay in the DOM (clipped rather than
+   removed) so accessible names and tooltips still resolve. The explicit size is
+   what keeps the active background on the button's own footprint — before, the
+   link stretched to the full scroll-area width and an 18px radius read as a
+   pill rather than a rounded square. */
+/* Collapsed the rail's content box is only 63px wide (64px minus the 1px
+   border), so the scroll region's 16px side padding leaves a 31px column — too
+   narrow for a 40px square, which then overflowed and sat left-clipped instead
+   of centred. Dropping the padding gives the square real slack to centre in. */
+.app-sidebar--collapsed .app-sidebar__scroll {
+  padding-inline: 0;
+}
+
+.app-sidebar--collapsed .sidebar-nav__link {
+  width: 40px;
+  height: 40px;
+  /* `margin-inline: auto` centres it via the layout, not a magic offset. */
+  margin-inline: auto;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  gap: 0;
+  border-radius: 12px;
+}
+
+/* Collapsed hover must stay distinct from the active fill rather than
+   replacing it with a lower-contrast tint. */
+.app-sidebar--collapsed .sidebar-nav__link:not(.sidebar-nav__link--active):hover {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+.app-sidebar--collapsed .sidebar-nav__label {
+  /* `sr-only`: reachable by assistive tech, invisible on screen. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.app-sidebar--collapsed .sidebar-section {
+  margin-bottom: var(--space-4);
+}
+
+.app-sidebar--collapsed .sidebar-team {
+  border: none;
+  background: transparent;
+}
+
+.app-sidebar--collapsed .sidebar-team__toggle {
+  justify-content: center;
+  padding: var(--space-2) 0;
+  gap: 0;
+}
+
+.app-sidebar--collapsed .sidebar-team__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-pressed);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.app-sidebar--collapsed .sidebar-subnav {
+  /* Sub-links carry icons + text; in a 64px rail they would clip. Team views
+     stay reachable by expanding the sidebar, and each team row keeps its
+     tooltip + accessible name in this state. */
+  display: none;
+}
+
+/* Header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--material-thick);
+  border-bottom: 1px solid var(--material-border);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--shadow-xs);
+  /* The sidebar is fixed at z-sidebar (above the header), so the header must be
+     inset by the sidebar width or its left edge renders underneath it. */
+  margin-left: var(--sidebar-current-width);
+  transition: margin-left var(--duration-normal) var(--spring-gentle);
+}
+
+.app-header__inner {
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-6);
+  padding: var(--space-3) var(--space-6);
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-4);
+  flex-wrap: nowrap;
+  min-height: var(--header-height);
 }
 
-.page--narrow {
-  max-width: 760px;
+.app-header__menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--spring-gentle);
 }
 
-.page__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
+.app-header__menu:hover {
+  background: var(--color-surface-pressed);
 }
 
-.page__title {
-  font-size: 1.6rem;
+.app-header__menu:active {
+  background: var(--color-border);
 }
 
-.page__subtitle {
-  margin: var(--space-1) 0 0;
-  color: var(--color-text-muted);
+.app-header__brand {
+  font-weight: 700;
+  font-size: 1.125rem;
+  text-decoration: none;
+  color: var(--color-text);
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  letter-spacing: -0.02em;
 }
 
-.breadcrumb {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
+.app-header__brand-sub {
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
 }
 
-.breadcrumb a {
-  text-decoration: none;
+.app-header__search {
+  position: relative;
+  flex: 1 1 300px;
+  max-width: 520px;
 }
 
-.breadcrumb a:hover {
-  text-decoration: underline;
+.app-header__search-icon {
+  position: absolute;
+  left: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  width: 20px;
+  height: 20px;
 }
 
-.note {
-  font-size: 0.85rem;
-}
-
-/* Cards -------------------------------------------------------------------- */
-
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.card__title {
-  font-size: 1.05rem;
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--space-4);
-  align-items: start;
-}
-
-.detail__description {
-  white-space: pre-wrap;
-  margin: 0;
-}
-
-.action-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-items: flex-start;
-}
-
-.action-block + .action-block {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
-}
-
-/* Forms -------------------------------------------------------------------- */
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.form__actions {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.field__label {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.field__required {
-  color: var(--color-danger);
-}
-
-.field__hint {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
-.field__error {
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-danger);
-}
-
-.field-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-4);
-}
-
-.field-inline-action {
-  display: flex;
-  justify-content: flex-start;
-}
-
-.input {
-  font: inherit;
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
+.app-header__search-input {
   width: 100%;
+  /* 44px clears the 20px icon at a 16px inset. It was --space-10 (128px), which
+     pushed the placeholder 112px past the icon. */
+  padding: var(--space-2) var(--space-4) var(--space-2) 44px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: text;
+  transition: border-color var(--duration-fast) var(--spring-gentle),
+              box-shadow var(--duration-fast) var(--spring-gentle),
+              background-color var(--duration-fast) var(--spring-gentle);
 }
 
-.input--textarea {
-  resize: vertical;
-  min-height: 96px;
+.app-header__search-input::placeholder {
+  color: var(--color-text-tertiary);
 }
 
-.field--invalid .input {
-  border-color: var(--color-danger);
+.app-header__search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.18);
+  background: var(--color-surface);
 }
 
-.input:disabled {
-  background: var(--color-surface-2);
-  color: var(--color-text-muted);
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
 }
 
-/* Buttons ------------------------------------------------------------------ */
+.app-header__new-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Sidebar bottom profile — anchored below the scrolling nav region. */
+.sidebar-profile {
+  margin-top: auto;
+  border-top: 1px solid var(--material-border);
+  padding: var(--space-3) var(--space-4);
+  background: var(--material-regular);
+}
+
+/* Collapsed the profile holds one 40px control, so centre it the same way the
+   rail's other rows are centred: container alignment, 12px effective margin. */
+.sidebar-profile__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Collapsed the profile holds one 36px avatar, so drop the horizontal padding:
+   leaving 16px per side would centre it in a 32px box that is 4px narrower than
+   the avatar itself, the same overflow that pushed the collapse control off
+   centre. Without the padding the row centres on the rail's true centre line. */
+.sidebar-profile__row--collapsed {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
+.app-sidebar--collapsed .sidebar-profile {
+  padding-inline: 0;
+}
+
+.sidebar-profile__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Collapsed: the avatar is a real button and the profile's only control. */
+.sidebar-profile__avatar--trigger {
+  cursor: pointer;
+  transition: box-shadow var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+}
+
+.sidebar-profile__avatar--trigger:hover {
+  box-shadow: 0 0 0 3px var(--color-surface-pressed);
+}
+
+.sidebar-profile__avatar--trigger:active {
+  transform: scale(0.95);
+}
+
+.sidebar-profile__avatar--trigger:focus-visible {
+  outline: 2px solid var(--color-focus, var(--color-primary));
+  outline-offset: 2px;
+}
+
+.sidebar-profile__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.25;
+}
+
+.sidebar-profile__name,
+.sidebar-profile__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile__name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+}
+
+.sidebar-profile__email {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+}
+
+.sidebar-profile__menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle);
+}
+
+.sidebar-profile__menu-button:hover {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+/* Account popover — portalled to <body>, so it is positioned in VIEWPORT
+   coordinates (top/left set inline from the trigger's rect) rather than being
+   sized from the sidebar's box. The previous version used left/right padding
+   offsets inside the sidebar, which made the menu ~32px wide when collapsed and
+   wrapped every word onto its own line; it was also clipped by the sidebar's
+   containing block. The portal escapes both problems at the source. */
+.account-menu {
+  position: fixed;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  border: 1px solid var(--material-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg, var(--shadow-md, var(--shadow-sm)));
+}
+
+.account-menu__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.account-menu__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.account-menu__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.3;
+}
+
+/* Truncate rather than wrap: a long address becomes "first.last@verylongdom…"
+   on one line instead of breaking into fragments. */
+.account-menu__name,
+.account-menu__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu__name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+}
+
+.account-menu__email {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+}
+
+.account-menu__divider {
+  height: 1px;
+  margin: 0 var(--space-1) var(--space-1);
+  background: var(--color-border);
+}
+
+.account-menu__signout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle);
+}
+
+.account-menu__signout:hover {
+  background: var(--color-surface-pressed);
+}
+
+/* Main Content */
+.app-main {
+  flex: 1 1 auto;
+  /* NOT `width: 100%`: with `margin-left` that would push the right edge to
+     viewport + sidebar and create a permanent 280px horizontal scrollbar. */
+  margin-left: var(--sidebar-current-width);
+  transition: margin-left var(--duration-normal) var(--spring-gentle);
+  padding: var(--space-8) var(--space-9) var(--space-10);
+  /* `100vh` here would add the 56px header to the page height and guarantee a
+     scrollbar on short pages. */
+  min-height: calc(100vh - var(--header-height));
+}
+
+/* Page Container */
+.page {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: grid;
+  /* `auto 1fr` made every page a two-row grid whose second row stretched to
+     fill the viewport. Pages are content stacks, so rows size to content. */
+  grid-auto-rows: min-content;
+  gap: var(--space-6);
+}
+
+/* A grid item's default `min-width: auto` refuses to shrink below its content's
+   min-content size, so a wide descendant — the 900px data table inside
+   `.table-wrap` — inflates the shared column and stretches every sibling,
+   including the metric row. `.table-wrap` already scrolls horizontally on its
+   own, so letting the track shrink is what makes that scroll actually kick in
+   instead of pushing the page wider than the viewport. */
+.page > * {
+  min-width: 0;
+}
+
+.page--narrow {
+  max-width: 800px;
+}
+
+/* ==========================================================================
+   Components - Buttons
+   ========================================================================== */
 
 .button {
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  color: var(--color-text);
-  padding: var(--space-2) var(--space-4);
-  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  min-height: 40px;
+  gap: var(--space-2);
+  font: inherit;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              border-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              box-shadow var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+  position: relative;
+  overflow: hidden;
 }
 
-.button:hover:not(:disabled) {
-  background: var(--color-surface-2);
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .button--primary {
   background: var(--color-primary);
   border-color: var(--color-primary);
   color: var(--color-primary-contrast);
+  min-height: 40px;
+  padding: 0 var(--space-5);
+  box-shadow: var(--shadow-xs);
 }
 
 .button--primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.button--primary:active:not(:disabled) {
+  background: var(--color-primary-pressed);
+  border-color: var(--color-primary-pressed);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(0) scale(0.98);
+}
+
+.button--secondary {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+  min-height: 40px;
+  padding: 0 var(--space-5);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: var(--color-surface-pressed);
+  border-color: var(--color-border-strong);
+}
+
+.button--secondary:active:not(:disabled) {
+  background: var(--color-border);
+  transform: scale(0.98);
 }
 
 .button--ghost {
-  border-color: transparent;
   background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  min-height: 40px;
+  padding: 0 var(--space-4);
 }
 
-.button--block {
+.button--ghost:hover:not(:disabled) {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+.button--ghost:active:not(:disabled) {
+  background: var(--color-border);
+  transform: scale(0.98);
+}
+
+.button--danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: white;
+  min-height: 40px;
+  padding: 0 var(--space-5);
+  box-shadow: var(--shadow-xs);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #b82828;
+  border-color: #b82828;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.button--danger:active:not(:disabled) {
+  background: #9e2222;
+  border-color: #9e2222;
+  box-shadow: var(--shadow-xs);
+  transform: translateY(0) scale(0.98);
+}
+
+.button--sm {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  font-size: 0.8125rem;
+}
+
+.button--lg {
+  min-height: 48px;
+  padding: 0 var(--space-6);
+  font-size: 1.0625rem;
+}
+
+.button--full {
   width: 100%;
 }
 
-.button:disabled {
-  opacity: 0.6;
+.button--icon-only {
+  padding: var(--space-2);
+  min-width: 40px;
+}
+
+.button__icon {
+  display: flex;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+.button__icon--end {
+  margin-left: var(--space-1);
+}
+
+.button__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button__spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* ==========================================================================
+   Components - Inputs
+   ========================================================================== */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+}
+
+.form-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.form-error {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: var(--space-3) var(--space-4);
+  transition: border-color var(--duration-fast) var(--spring-gentle),
+              box-shadow var(--duration-fast) var(--spring-gentle),
+              background-color var(--duration-fast) var(--spring-gentle);
+}
+
+.input::placeholder {
+  color: var(--color-text-tertiary);
+  opacity: 0.7;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.18);
+}
+
+.input:disabled {
+  background: var(--color-surface-pressed);
+  color: var(--color-text-tertiary);
   cursor: not-allowed;
 }
 
-/* Filters ------------------------------------------------------------------ */
+.input--error {
+  border-color: var(--color-danger);
+}
 
-.filters {
+.input--error:focus {
+  box-shadow: 0 0 0 3px rgba(209, 45, 45, 0.18);
+}
+
+.input--sm {
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.875rem;
+}
+
+.input--lg {
+  padding: var(--space-4) var(--space-5);
+  font-size: 1.0625rem;
+}
+
+.input-leading-icon {
+  position: absolute;
+  left: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  width: 20px;
+  height: 20px;
+}
+
+.input-trailing-icon {
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  width: 20px;
+  height: 20px;
+}
+
+.input-has-leading-icon {
+  padding-left: 44px;
+}
+
+.input-has-trailing-icon {
+  padding-right: 44px;
+}
+
+.input-action {
+  position: absolute;
+  right: var(--space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+}
+
+.input-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--spring-gentle),
+              background-color var(--duration-fast) var(--spring-gentle);
+}
+
+.input-action-button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-pressed);
+}
+
+.input-action-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.input-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.select {
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
+  background-size: 20px;
+  padding-right: 44px;
+}
+
+.select:disabled {
+  cursor: not-allowed;
+}
+
+.textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: var(--font-sans);
+}
+
+/* ==========================================================================
+   Components - Cards (Double Bezel)
+   ========================================================================== */
+
+.card-shell {
+  background: var(--material-regular);
+  border: 1px solid var(--material-border);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+.card-core {
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-inner-strong);
+  overflow: hidden;
+}
+
+.card-elevated {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-4);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--duration-normal) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+}
+
+.card-elevated:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.card-elevated:active {
+  transform: translateY(0) scale(0.995);
   box-shadow: var(--shadow-sm);
 }
 
-.filters__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-4);
-  align-items: end;
-}
+/* ---------------------------------------------------------------------------
+   Metric card (dashboard summary tile)
+   ---------------------------------------------------------------------------
+   `.card-elevated` sets the surface, border, radius and shadow but NO padding,
+   so every metric card used to rely on ad-hoc utility classes in the page. The
+   label ended up ~1px from the top edge and the supporting line ~1px from the
+   bottom border. Structure and spacing live here instead, so all four cards are
+   identical by construction rather than by repetition.
 
-@media (max-width: 900px) {
-  .filters__grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 600px) {
-  .filters__grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.filters__actions {
+   Sized off `--space-*` and the existing radius/shadow tokens to stay inside the
+   design system.
+--------------------------------------------------------------------------- */
+.metric-card {
   display: flex;
-  align-items: end;
+  flex-direction: column;
+  /* A floor, not a fixed height: the card may grow if the caption wraps, and it
+     never shrinks below the design's intended block size. */
+  min-height: 128px;
+  /* 16px: inside the 16-20px the design calls for, and equal to --space-4 so it
+     stays on the project's spacing scale. */
+  padding: var(--space-4);
+  gap: var(--space-3);
+  /* Guards against long values pushing the caption past the border. */
+  overflow: hidden;
 }
 
-/* Table -------------------------------------------------------------------- */
+.metric-card__header {
+  display: flex;
+  /* `flex-start` so the icon stays top-aligned even when the label wraps to two
+     lines — this is what keeps the four icons on a single optical line. */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.metric-card__label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  /* Sentence case is already in the markup; the tracking gives it eyebrow
+     presence without uppercasing the word in CSS (which screen readers would
+     spell out letter by letter). */
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+  /* Allows the label to shrink instead of forcing the icon out of the card. */
+  min-width: 0;
+}
+
+.metric-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Fixed box: the glyph inside is 24px but the chip never changes size, so all
+     four icons share one alignment regardless of the icon chosen. */
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  /* 12px keeps the chip a rounded square rather than a circle. `--radius-lg`
+     (18px) on a 40px box reads as a pill. */
+  border-radius: 12px;
+  background: var(--color-primary-muted, rgba(0, 102, 204, 0.1));
+  color: var(--color-primary);
+}
+
+.metric-card__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.metric-card__body {
+  display: flex;
+  flex-direction: column;
+  /* `auto` pins the caption to the bottom of the flex column, so its distance
+     from the border is (padding) rather than an incidental margin collapse. */
+  margin-top: auto;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.metric-card__value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  /* Tightened from the default so the value reads as one block. */
+  line-height: 1.1;
+  color: var(--color-text);
+  /* Keeps a very large count on one line rather than reflowing the card. */
+  overflow-wrap: anywhere;
+}
+
+.metric-card__caption {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--color-text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Variant tinting — the value and caption pick up the metric's meaning. The old
+   implementation used Tailwind classes (`text-success`, `text-warning`, …) that
+   were never defined, so every variant rendered in the default colour. */
+.metric-card--success .metric-card__value,
+.metric-card--success .metric-card__caption {
+  color: var(--color-success);
+}
+
+.metric-card--warning .metric-card__value,
+.metric-card--warning .metric-card__caption {
+  color: var(--color-warning);
+}
+
+.metric-card--danger .metric-card__value,
+.metric-card--danger .metric-card__caption {
+  color: var(--color-danger);
+}
+
+/* The tinted chips follow the variant too, so the icon and the value agree. */
+.metric-card--success .metric-card__icon {
+  background: rgba(52, 199, 89, 0.12);
+  color: var(--color-success);
+}
+
+.metric-card--warning .metric-card__icon {
+  background: rgba(255, 149, 0, 0.12);
+  color: var(--color-warning);
+}
+
+.metric-card--danger .metric-card__icon {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--color-danger);
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Action card: a navigation tile whose whole surface is the link target. */
+.action-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.action-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+.action-card__icon--primary {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+.action-card__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.action-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.action-card__description {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.card__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.card__subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+}
+
+/* ==========================================================================
+   Components - Badges
+   ========================================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              border-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              opacity var(--duration-fast) var(--spring-gentle);
+}
+
+.badge:hover {
+  opacity: 0.9;
+}
+
+.badge--status-open {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border-color: var(--color-info);
+}
+
+.badge--status-in_progress {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.badge--status-awaiting_approval {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.badge--status-resolved {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.badge--status-closed {
+  background: var(--color-surface-pressed);
+  color: var(--color-text-tertiary);
+  border-color: var(--color-border);
+}
+
+.badge--priority-low {
+  background: var(--color-surface-pressed);
+  color: var(--color-text-tertiary);
+  border-color: var(--color-border);
+}
+
+.badge--priority-medium {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border-color: var(--color-info);
+}
+
+.badge--priority-high {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.badge--priority-critical {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.badge--type {
+  background: var(--color-surface-pressed);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+/* ==========================================================================
+   Components - Tables
+   ========================================================================== */
 
 .results {
   display: flex;
@@ -935,33 +1895,36 @@ a {
   overflow-x: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 860px;
+  min-width: 900px;
+  font-size: 0.875rem;
 }
 
 .table th,
 .table td {
   text-align: left;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
-  font-size: 0.9rem;
 }
 
 .table thead th {
-  background: var(--color-surface-2);
-  font-size: 0.78rem;
+  background: var(--color-surface-pressed);
+  font-size: 0.6875rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
+  letter-spacing: 0.1em;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
   position: sticky;
   top: 0;
+  z-index: 1;
+  white-space: nowrap;
 }
 
 .table tbody tr:last-child th,
@@ -969,28 +1932,37 @@ a {
   border-bottom: none;
 }
 
-.table tbody tr:hover {
-  background: var(--color-surface-2);
+.table tbody tr {
+  transition: background-color var(--duration-fast) var(--spring-gentle);
 }
+
+/* Row hover and :active for clickable rows live in the gated block with the
+   other pointer affordances, near the end of this file. */
 
 .table__title-cell {
   font-weight: 600;
 }
 
 .table__title-link {
+  color: var(--color-text);
   text-decoration: none;
+  font-weight: 500;
 }
 
 .table__title-link:hover {
-  text-decoration: underline;
+  color: var(--color-primary);
+  text-decoration: none;
 }
 
-.refreshing {
-  font-size: 0.85rem;
-  margin: 0;
+/* Clickable table row. The cursor and press feedback key off this class rather
+   than an inline `style` attribute, which a re-render could drop. */
+.table__row--clickable {
+  cursor: pointer;
 }
 
-/* Pagination --------------------------------------------------------------- */
+/* ==========================================================================
+   Components - Pagination
+   ========================================================================== */
 
 .pagination {
   display: flex;
@@ -998,135 +1970,250 @@ a {
   justify-content: space-between;
   gap: var(--space-3);
   flex-wrap: wrap;
+  padding-top: var(--space-4);
 }
 
 .pagination__summary {
   margin: 0;
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
 }
 
 .pagination__controls {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .pagination__page {
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  color: var(--color-text-tertiary);
 }
 
-/* Badges ------------------------------------------------------------------- */
-
-.badge-row {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin-top: var(--space-2);
-}
-
-.badge {
+.pagination__button {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  border-radius: 999px;
-  padding: 2px var(--space-3);
-  font-size: 0.78rem;
-  font-weight: 600;
-  border: 1px solid transparent;
-  white-space: nowrap;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              border-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
 }
 
-.badge--type {
-  background: var(--color-surface-2);
-  border-color: var(--color-border);
-  color: var(--color-text-muted);
-}
-
-.badge--status {
-  background: var(--color-surface-2);
+.pagination__button:hover:not(:disabled) {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
   border-color: var(--color-border-strong);
+}
+
+.pagination__button:active:not(:disabled) {
+  background: var(--color-border);
+  transform: scale(0.95);
+}
+
+.pagination__button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination__button--active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+.pagination__button--active:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: var(--color-primary-contrast);
+}
+
+/* ==========================================================================
+   Components - Filters
+   ========================================================================== */
+
+.filters {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+}
+
+.filters__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-5);
+  align-items: end;
+}
+
+/* Six fields in an auto-fit grid at desktop width produce four columns and a
+   ragged two-item second row. Pin the count so the rows fill: three and three
+   when there is room, two otherwise. The sidebar takes 280px off the viewport,
+   so a viewport query is offset to keep the thresholds near the content width
+   they are meant to describe. */
+@media (min-width: 1100px) {
+  .filters__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1099px) {
+  .filters__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .filters__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.filters__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.filters__preset-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-tertiary);
+  margin-right: var(--space-2);
+  align-self: center;
+}
+
+.button--preset {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+  font-weight: 500;
+}
+
+.button--preset:hover:not(:disabled) {
+  background: var(--color-surface-pressed);
   color: var(--color-text);
 }
 
-.badge--status-open {
-  background: var(--color-info-bg);
-  border-color: var(--color-info);
-  color: var(--color-info);
-}
-.badge--status-in_progress {
-  background: var(--color-warning-bg);
-  border-color: var(--color-warning);
-  color: var(--color-warning);
-}
-.badge--status-awaiting_approval {
-  background: var(--color-warning-bg);
-  border-color: var(--color-warning);
-  color: var(--color-warning);
-}
-.badge--status-resolved {
-  background: var(--color-success-bg);
-  border-color: var(--color-success);
-  color: var(--color-success);
-}
-.badge--status-closed {
-  background: var(--color-surface-2);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-muted);
+.button--preset:active:not(:disabled) {
+  background: var(--color-border);
+  transform: scale(0.98);
 }
 
-.badge--priority-low {
-  background: var(--color-surface-2);
-  border-color: var(--color-border);
-  color: var(--color-text-muted);
-}
-.badge--priority-medium {
-  background: var(--color-info-bg);
-  border-color: var(--color-info);
-  color: var(--color-info);
-}
-.badge--priority-high {
-  background: var(--color-warning-bg);
-  border-color: var(--color-warning);
-  color: var(--color-warning);
-}
-.badge--priority-critical {
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger);
-  color: var(--color-danger);
+.button--preset--active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-contrast);
 }
 
-.badge--overdue {
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger);
-  color: var(--color-danger);
+.button--preset--active:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: var(--color-primary-contrast);
 }
 
-/* Alerts ------------------------------------------------------------------- */
+.filters__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ==========================================================================
+   Components - Page Header
+   ========================================================================== */
+
+.page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.page__title {
+  font-size: clamp(1.75rem, 3.5vw, 2.25rem);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.page__subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.page__subtitle .text-eyebrow {
+  margin-right: var(--space-2);
+}
+
+.breadcrumb {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+}
+
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   Components - Alerts
+   ========================================================================== */
 
 .alert {
   display: flex;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-xl);
   border: 1px solid transparent;
   align-items: flex-start;
+  box-shadow: var(--shadow-xs);
 }
 
 .alert__content {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  flex: 1;
 }
 
 .alert__title {
   margin: 0;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 0.9375rem;
 }
 
 .alert__body {
   margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
 .alert__actions {
@@ -1138,14 +2225,14 @@ a {
 
 .alert__icon {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   border: 1px solid currentColor;
 }
 
@@ -1154,35 +2241,40 @@ a {
   border-color: var(--color-danger);
   color: var(--color-danger);
 }
+
 .alert--warning {
   background: var(--color-warning-bg);
   border-color: var(--color-warning);
   color: var(--color-warning);
 }
+
 .alert--success {
   background: var(--color-success-bg);
   border-color: var(--color-success);
   color: var(--color-success);
 }
+
 .alert--info {
   background: var(--color-info-bg);
   border-color: var(--color-info);
   color: var(--color-info);
 }
 
-/* States ------------------------------------------------------------------- */
+/* ==========================================================================
+   Components - States (Empty, Loading, Error)
+   ========================================================================== */
 
 .state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-6) var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-10) var(--space-7);
   text-align: center;
   background: var(--color-surface);
   border: 1px dashed var(--color-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xl);
 }
 
 .state--full {
@@ -1191,14 +2283,25 @@ a {
   background: transparent;
 }
 
+.state__icon {
+  width: 72px;
+  height: 72px;
+  color: var(--color-text-tertiary);
+  opacity: 0.4;
+}
+
 .state__title {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .state__message {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   max-width: 46ch;
+  line-height: 1.65;
+  font-size: 1rem;
 }
 
 .state__actions {
@@ -1210,18 +2313,16 @@ a {
 }
 
 .spinner {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: 3px solid var(--color-border-strong);
+  border: 3px solid var(--color-border);
   border-top-color: var(--color-primary);
   animation: spin 0.9s linear infinite;
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1230,51 +2331,361 @@ a {
   }
 }
 
-/* Auth --------------------------------------------------------------------- */
+/* ==========================================================================
+   Components - Avatar
+   ========================================================================== */
 
-.auth-layout {
-  min-height: 100vh;
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.avatar--xs { width: 24px; height: 24px; font-size: 0.6875rem; }
+.avatar--sm { width: 32px; height: 32px; font-size: 0.75rem; }
+.avatar--md { width: 40px; height: 40px; font-size: 0.875rem; }
+.avatar--lg { width: 56px; height: 56px; font-size: 1.125rem; }
+.avatar--xl { width: 72px; height: 72px; font-size: 1.5rem; }
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-group {
+  display: inline-flex;
+}
+
+.avatar-group .avatar {
+  border: 2px solid var(--color-bg);
+  margin-left: -8px;
+  transition: transform var(--duration-fast) var(--spring-gentle), box-shadow var(--duration-fast) var(--spring-gentle);
+}
+
+.avatar-group .avatar:first-child {
+  margin-left: 0;
+}
+
+.avatar-group .avatar:hover {
+  z-index: 1;
+  transform: scale(1.08);
+  box-shadow: var(--shadow-md);
+}
+
+/* ==========================================================================
+   Components - Skeleton
+   ========================================================================== */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-border) 25%,
+    var(--color-surface-pressed) 50%,
+    var(--color-border) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-lg);
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--color-border);
+  }
+}
+
+/* ==========================================================================
+   Components - Toast
+   ========================================================================== */
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-xl);
+  min-width: 320px;
+  max-width: 480px;
+  animation: toastEnter var(--duration-normal) var(--spring-snappy);
+}
+
+@keyframes toastEnter {
+  from { opacity: 0; transform: translateX(100%) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.toast--exiting {
+  animation: toastExit var(--duration-fast) var(--spring-gentle) forwards;
+}
+
+@keyframes toastExit {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(100%) scale(0.95); }
+}
+
+.toast__icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
+}
+
+.toast__content {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  width: 100%;
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast__title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  margin-bottom: 2px;
+}
+
+.toast__message {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.toast__action {
+  margin-top: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toast__action:hover {
+  text-decoration: underline;
+}
+
+.toast__close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--spring-gentle),
+              color var(--duration-fast) var(--spring-gentle),
+              transform var(--duration-fast) var(--spring-gentle);
+}
+
+.toast__close:hover {
+  background: var(--color-surface-pressed);
+  color: var(--color-text);
+}
+
+.toast__close:active {
+  transform: scale(0.9);
+}
+
+/* Toast type variants */
+.toast--success {
+  border-color: var(--color-success);
+}
+
+.toast--success .toast__icon {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.toast--error {
+  border-color: var(--color-danger);
+}
+
+.toast--error .toast__icon {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.toast--warning {
+  border-color: var(--color-warning);
+}
+
+.toast--warning .toast__icon {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.toast--info {
+  border-color: var(--color-info);
+}
+
+.toast--info .toast__icon {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+/* ==========================================================================
+   Auth Layout
+   ========================================================================== */
+
+.auth-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding:
+    max(var(--space-8), env(safe-area-inset-top))
+    max(var(--space-4), env(safe-area-inset-right))
+    max(var(--space-8), env(safe-area-inset-bottom))
+    max(var(--space-4), env(safe-area-inset-left));
+  background:
+    radial-gradient(ellipse at 50% -50%, rgba(0, 102, 204, 0.06), transparent 60%),
+    var(--color-bg);
 }
 
 .auth-card {
   width: 100%;
-  max-width: 420px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
-  padding: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  max-width: 440px;
+  /* Auto margins centre the card but collapse on short viewports, avoiding
+     the clipped-top failure mode of pure flex centring. */
+  margin: auto 0;
+  overflow: hidden;
+}
+
+.auth-card__core {
+  padding: 36px;
+}
+
+.auth-card__header {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.auth-card__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--space-5);
+  border-radius: var(--radius-2xl);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
 }
 
 .auth-card__title {
-  font-size: 1.5rem;
+  margin: 0 0 var(--space-2);
+  font-size: clamp(1.5rem, 5vw, 1.75rem);
+  line-height: 1.25;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
 }
 
 .auth-card__subtitle {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
+  text-align: center;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.auth-role-preview {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-pressed);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.auth-role-preview__label {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.auth-role-preview__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-role-preview__empty {
+  margin: 0;
 }
 
 .auth-card__note {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
+  margin: var(--space-6) 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  text-wrap: pretty;
 }
 
-/* Facts list --------------------------------------------------------------- */
+/* ==========================================================================
+   Facts List
+   ========================================================================== */
 
 .facts {
   margin: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--space-3) var(--space-5);
+  gap: var(--space-3) var(--space-6);
+}
+
+/* Eight fact rows. Pin to four columns once the container is wide enough for
+   them, so the count is deliberate rather than whatever auto-fit lands on. */
+@media (min-width: 900px) {
+  .facts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .facts__row {
@@ -1284,12 +2695,747 @@ a {
 }
 
 .facts dt {
-  font-size: 0.78rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
 }
 
 .facts dd {
   margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 1200px) {
+  .app-main {
+    padding: var(--space-7) var(--space-7) var(--space-9);
+  }
+}
+
+@media (max-width: 1024px) {
+  /* The sidebar becomes an overlay drawer, so nothing is offset by it. Both
+     selectors are named so this beats `.app-shell--collapsed` on specificity
+     rather than relying on source order. */
+  .app-shell,
+  .app-shell--collapsed {
+    --sidebar-current-width: 0px;
+  }
+
+  .app-sidebar {
+    transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--spring-gentle);
+  }
+
+  .app-sidebar--open {
+    transform: translateX(0);
+  }
+
+  .app-sidebar-overlay {
+    display: block;
+  }
+
+  .app-sidebar-overlay--visible {
+    opacity: 1;
+  }
+
+  .app-header__menu {
+    display: flex;
+  }
+
+  .app-header__search {
+    display: block;
+    max-width: none;
+    flex: 1 1 auto;
+  }
+
+  .app-main {
+    padding: var(--space-6) var(--space-6) var(--space-8);
+  }
+
+  /* The sidebar is a drawer at this width, not a rail, so the collapse control
+     has no meaning here; the drawer has its own dismiss control. */
+  .app-sidebar__collapse {
+    display: none;
+  }
+
+  /* The drawer-dismiss control only exists while the sidebar IS a drawer. At
+     desktop widths it was still rendered (display:flex) and reachable by
+     keyboard, offering a dismiss action for a drawer that cannot be open. */
+  .app-sidebar__close {
+    display: flex;
+  }
+}
+
+/* Above the drawer breakpoint, remove the dismiss control from the layout and
+   the accessibility tree entirely. */
+@media (min-width: 1025px) {
+  .app-sidebar__close {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header__new-item span {
+    display: none;
+  }
+
+  .app-header__new-item {
+    padding: 0 var(--space-3);
+    min-width: 44px;
+  }
+
+  .page__header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .page__header > .button {
+    width: 100%;
+  }
+
+  .page__title {
+    font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header__teams {
+    display: none;
+  }
+
+  .page {
+    padding: 0;
+  }
+
+  .page__title {
+    font-size: 1.375rem;
+  }
+
+  .table-wrap {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    margin-left: calc(-1 * var(--space-6));
+    margin-right: calc(-1 * var(--space-6));
+    width: calc(100% + 2 * var(--space-6));
+  }
+
+  .filters__grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .auth-card {
+    max-width: 100%;
+    border-radius: var(--radius-xl);
+  }
+
+  .auth-card__core {
+    padding: var(--space-6);
+  }
+
+  .input-action-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .input-has-trailing-icon {
+    padding-right: 52px;
+  }
+
+  .card {
+    padding: var(--space-5);
+  }
+
+  .card-shell {
+    padding: var(--space-1);
+  }
+}
+
+/* ==========================================================================
+   Reduced Motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .spinner {
+    animation-duration: 2.4s;
+  }
+
+  .skeleton {
+    animation: none;
+    background: var(--color-border);
+  }
+}
+
+/* ==========================================================================
+   Design system preflight guards
+   Tailwind's Preflight is a reset; these rules re-establish the baseline the
+   design system assumes. Preflight emits into `@layer base`, so unlayered
+   rules here (and every rule above) always win against it.
+   ========================================================================== */
+
+/* Preflight zeroes heading sizes and margins. `.page__title`, `.text-h*` and
+   `.card__title` set their own; bare headings need a scale to fall back on. */
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.125rem; }
+h4 { font-size: 1rem; }
+h5 { font-size: 0.875rem; }
+h6 { font-size: 0.8125rem; }
+
+/* Preflight sets buttons to `cursor: default`. Restore the affordance for
+   every interactive control in the design system. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+select:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Hover is a mouse affordance. On touch, a tap triggers `:hover` and leaves the
+   style stuck until the next tap elsewhere, so gate pointer-only feedback. */
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-nav__link:hover {
+    background: var(--color-surface-pressed);
+    color: var(--color-text);
+  }
+
+  .sidebar-subnav__link:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .table tbody tr.table__row--clickable:hover {
+    background: var(--color-surface-pressed);
+  }
+}
+
+/* Press feedback. Buttons already scale; nav links and table rows fire on
+   pointer-down too, so the app reads as uniformly responsive. */
+.sidebar-nav__link:active,
+.sidebar-subnav__link:active {
+  transform: scale(0.99);
+}
+
+.table tbody tr.table__row--clickable:active {
+  background: var(--color-border);
+}
+
+/* Preflight strips list markers and padding. The design system's nav lists opt
+   out already; keep content lists readable if one is authored later. */
+.prose ul,
+.prose ol {
+  padding-left: var(--space-5);
+  list-style: revert;
+}
+
+/* ==========================================================================
+   Base button defaults
+   ==========================================================================
+   `.button` alone previously carried no height or padding: only the variants
+   did. Nine call sites use a bare `className="button"` (reload, cancel, clear
+   filters, secondary state actions), so those rendered as unstyled text with a
+   hit area the height of the glyphs. Give the base variant the same box as
+   `--secondary`, which is the intended "neutral" look. */
+
+.button {
+  min-height: 40px;
+  padding: 0 var(--space-5);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--color-surface-pressed);
+  border-color: var(--color-border-strong);
+}
+
+.button:active:not(:disabled) {
+  background: var(--color-surface-pressed);
+  transform: scale(0.98);
+}
+
+.button__label {
+  display: inline-block;
+  min-width: 0;
+}
+
+/* ==========================================================================
+   Text utilities
+   ==========================================================================
+   `.mono` and `.muted` are used throughout the pages (ids, timestamps,
+   "Unassigned", helper copy) and had no rule at all, so identifiers rendered in
+   the body font and de-emphasised text stayed full-contrast. */
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--color-text-tertiary);
+}
+
+/* ==========================================================================
+   Field
+   ==========================================================================
+   `FormField` renders `.field` with `.field__label/hint/error/required`, and
+   `ItemFormFields` renders `.field-row` / `.field-inline-action`. Only the
+   legacy `.form-label` / `.form-hint` / `.form-error` names existed. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+}
+
+.field__label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.field__required {
+  color: var(--color-danger);
+}
+
+.field__hint {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.field__error {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.field--invalid .input,
+.field--invalid select,
+.field--invalid textarea {
+  border-color: var(--color-danger);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.field-inline-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Multi-line inputs need a fixed height and vertical padding rather than the
+   single-line centring the base `.input` uses. */
+.input--textarea {
+  min-height: 96px;
+  padding: var(--space-3) var(--space-4);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* ==========================================================================
+   Form
+   ==========================================================================
+   `.form` and `.form__actions` are used by the create and edit pages. */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.form__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-2);
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
+}
+
+/* ==========================================================================
+   Badges
+   ==========================================================================
+   `Badges.tsx` emits `badge badge--status` / `badge--priority` as base
+   modifiers plus the per-value class. Without a base rule the modifier carried
+   no shared treatment; `badge-row` groups them and `badge--overdue` is the
+   standalone due-date flag on the detail page. */
+
+.badge--status,
+.badge--priority {
+  text-transform: capitalize;
+}
+
+.badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.badge--overdue {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Item detail layout
+   ========================================================================== */
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.detail__description {
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.action-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding-bottom: var(--space-4);
+}
+
+.action-block + .action-block {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.action-block:last-child {
+  padding-bottom: 0;
+}
+
+/* ==========================================================================
+   Activity timeline
+   ========================================================================== */
+
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-timeline > li {
+  margin: 0;
+  padding: 0;
+}
+
+.activity-event {
+  position: relative;
+  padding: 0 0 var(--space-5) var(--space-6);
+  border-left: 2px solid var(--color-border);
+}
+
+.activity-event:last-child {
+  padding-bottom: 0;
+  border-left-color: transparent;
+}
+
+.activity-event::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--space-2) + 1px);
+  top: 0.35rem;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-surface);
+}
+
+.activity-event__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.activity-event__type {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.activity-event__time {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+}
+
+.activity-event__details {
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.activity-details {
+  /* Pairs size to their content and wrap; a grid adds a trailing empty track
+     when the pair count does not divide the track count. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-6);
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+}
+
+/* Each <dt>/<dd> pair is wrapped in a <div>, so the grid lays out pairs and
+   this row aligns the label with its value. */
+.activity-details > div {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.activity-details dt {
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  /* A shared gutter, so the values of two Activity blocks on one page line up
+     instead of shifting with whichever label is longest. */
+  min-width: 4.5rem;
+}
+
+.activity-details dd {
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.activity-details--raw {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+/* ==========================================================================
+   Comments
+   ========================================================================== */
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.comment {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.comment__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.comment__author {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.comment__time {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+}
+
+.comment__body {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.comment-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form-field__label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.form-field__input {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: var(--space-3) var(--space-4);
+  transition: border-color var(--duration-fast) var(--spring-gentle),
+              box-shadow var(--duration-fast) var(--spring-gentle);
+}
+
+.form-field__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-info-bg);
+}
+
+.form-field__input--textarea {
+  min-height: 96px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.note {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* ==========================================================================
+   Empty state
+   ========================================================================== */
+
+.state--empty {
+  color: var(--color-text-secondary);
+}
+
+.state--empty .state__title {
+  color: var(--color-text);
+}
+
+/* An empty result set drawn inside a card should not add a second frame. */
+.card-core > .state--empty,
+.card > .state--empty {
+  padding: 0;
+}
+
+/* ==========================================================================
+   Refreshing indicator
+   ==========================================================================
+   `ItemsPage` marks an in-flight refetch with `.refreshing` on the results
+   region; without a rule the only cue was `aria-busy`. */
+
+.refreshing {
+  opacity: 0.6;
+  transition: opacity var(--duration-fast) var(--spring-gentle);
+}
+
+.refreshing * {
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Print
+   ========================================================================== */
+
+@media print {
+  .app-sidebar,
+  .app-header,
+  .button,
+  .filters,
+  .pagination,
+  .skip-link {
+    display: none !important;
+  }
+
+  .app-main {
+    margin-left: 0;
+    padding: 0;
+  }
+
+  .page {
+    max-width: none;
+  }
+
+  .table-wrap {
+    overflow: visible;
+    border: none;
+    box-shadow: none;
+  }
+
+  .table {
+    min-width: 100%;
+  }
+
+  .table thead th {
+    position: static;
+  }
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+﻿import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listItems } from "../api/items";
 import type {
@@ -10,10 +10,10 @@ import type {
   WorkStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { PriorityBadge, StatusBadge, TypeBadge } from "../components/Badges";
-import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
+import { StatusBadge, PriorityBadge, TypeBadge } from "../components/ui/Badge";
+import { ErrorState } from "../components/StateViews";
 import { FormField } from "../components/FormField";
-import { Pagination } from "../components/Pagination";
+import { Table, TablePagination } from "../components/ui/Table";
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
@@ -26,6 +26,7 @@ import { formatDate, formatDateTime, isOverdue, isUuid, shortId } from "../lib/f
 import { teamsWhereUserCanCreate } from "../lib/permissions";
 import { errorMessage } from "../lib/apiErrors";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { PlusIcon, FilterIcon, XIcon, ChevronDownIcon, SearchIcon, Loader2Icon } from "lucide-react";
 
 interface AppliedFilters {
   teamId: string;
@@ -53,10 +54,6 @@ const INITIAL_FILTERS: AppliedFilters = {
   page: 1,
 };
 
-/**
- * Parse a sort:string like "updatedAt:desc" into { sort, order }.
- * Falls back to defaults if the format is invalid.
- */
 function parseSortValue(value: string | null): { sort: SortField; order: SortDirection } {
   if (!value) return { sort: "updatedAt", order: "desc" };
   const [sort, order] = value.split(":") as [SortField, SortDirection];
@@ -65,41 +62,30 @@ function parseSortValue(value: string | null): { sort: SortField; order: SortDir
   return { sort: validSort, order: validOrder };
 }
 
-/**
- * Build a sort string from sort and order.
- */
 function buildSortValue(sort: SortField, order: SortDirection): string {
   return `${sort}:${order}`;
 }
 
-/**
- * Operations dashboard: a server-filtered, server-paginated list of the work
- * items the signed-in user is allowed to see.
- *
- * Filtering and pagination are performed by the backend; the browser never
- * downloads the full collection. Changing any filter resets to page 1, and the
- * free-text filters are debounced so a burst of keystrokes produces a single
- * request rather than one per character.
- *
- * Queue state is synchronized with the URL query string so that filters,
- * search, sort, and pagination are shareable and survive refresh.
- */
 export function ItemsPage() {
   const { memberships, user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Initialize state from URL search params on first render.
-  // Use location.search as a fallback for environments where useSearchParams
-  // doesn't parse initialEntries correctly (e.g., MemoryRouter in tests).
   const [initialized, setInitialized] = useState(false);
   const [text, setText] = useState({ search: "", assigneeId: "" });
   const [applied, setApplied] = useState<AppliedFilters>(INITIAL_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+
+  // The `search` value this page last wrote into the URL. The header's global
+  // search is a second writer of the same param, so this page must be able to
+  // tell "the URL changed because I wrote it" from "the URL changed because the
+  // header pushed a new query" — otherwise the two writers overwrite each other
+  // in a loop and neither query ever reaches the server.
+  const lastWrittenSearch = useRef<string | null>(null);
 
   useEffect(() => {
     if (initialized) return;
-    // Prefer useSearchParams, but fall back to parsing location.search directly
-    // for test environments where initialEntries query strings aren't parsed.
     const params = searchParams.toString() ? searchParams : new URLSearchParams(location.search);
     const teamId = params.get("teamId") ?? "";
     const status = params.get("status") ?? "";
@@ -111,10 +97,10 @@ export function ItemsPage() {
     const pageSize = Math.max(1, Math.min(100, Number(params.get("pageSize")) || DEFAULT_PAGE_SIZE));
     const { sort, order } = parseSortValue(params.get("sort"));
 
-    // Only update if URL has non-default values to avoid unnecessary re-renders.
     const hasUrlState = teamId || status || priority || assigneeId || search || preset || page !== 1 || pageSize !== DEFAULT_PAGE_SIZE || sort !== "updatedAt" || order !== "desc";
     if (hasUrlState) {
       setText({ search, assigneeId });
+      lastWrittenSearch.current = search;
       setApplied({
         teamId,
         status: status as WorkStatus | "",
@@ -131,12 +117,22 @@ export function ItemsPage() {
     setInitialized(true);
   }, [searchParams, location.search, initialized]);
 
+  // Adopt a `search` query pushed in from outside this page (the header's global
+  // search) after mount. The mount effect above only reads the URL once, so
+  // without this a header search made while the list is already open would be
+  // silently discarded. Values this page wrote itself are skipped.
+  useEffect(() => {
+    if (!initialized) return;
+    const fromUrl = searchParams.get("search") ?? "";
+    if (fromUrl === lastWrittenSearch.current) return;
+    lastWrittenSearch.current = fromUrl;
+    setText((prev) => (prev.search === fromUrl ? prev : { ...prev, search: fromUrl }));
+    setApplied((prev) => (prev.search === fromUrl ? prev : { ...prev, search: fromUrl, page: 1 }));
+  }, [searchParams, initialized]);
+
   const debouncedSearch = useDebouncedValue(text.search, 300);
   const debouncedAssignee = useDebouncedValue(text.assigneeId, 300);
 
-  // Fold debounced text into the applied filters atomically, resetting the page.
-  // Doing it here (rather than reading the debounced values directly) keeps the
-  // request count to exactly one per settled search term.
   useEffect(() => {
     const nextSearch = debouncedSearch.trim();
     const nextAssignee = debouncedAssignee.trim();
@@ -146,8 +142,6 @@ export function ItemsPage() {
     });
   }, [debouncedSearch, debouncedAssignee]);
 
-  // Synchronize applied filters to URL search params.
-  // We use `replace` to avoid polluting history with every keystroke/filter change.
   useEffect(() => {
     if (!initialized) return;
     const nextParams = new URLSearchParams();
@@ -162,6 +156,7 @@ export function ItemsPage() {
     if (applied.sort !== "updatedAt" || applied.order !== "desc") {
       nextParams.set("sort", buildSortValue(applied.sort, applied.order));
     }
+    lastWrittenSearch.current = applied.search;
     setSearchParams(nextParams, { replace: true });
   }, [applied, initialized, setSearchParams]);
 
@@ -178,8 +173,6 @@ export function ItemsPage() {
     setApplied({ ...INITIAL_FILTERS });
   }
 
-  // Only send a well-formed assignee id; a partial value is a UI hint, never an
-  // invalid query parameter.
   const assigneeFilter = applied.assigneeId && isUuid(applied.assigneeId) ? applied.assigneeId : undefined;
   const assigneeInvalid = applied.assigneeId.length > 0 && !isUuid(applied.assigneeId);
 
@@ -213,6 +206,33 @@ export function ItemsPage() {
 
   const data = itemsQuery.data;
 
+  // Table columns
+  const columns = [
+    { key: "title", header: "Title", width: "28%", rowHeader: true, render: (item: any) => (
+      <Link to={`/items/${item.id}`} className="table__title-link">
+        {item.title}
+      </Link>
+    )},
+    { key: "status", header: "Status", width: "10%", render: (item: any) => <StatusBadge status={item.status} /> },
+    { key: "priority", header: "Priority", width: "10%", render: (item: any) => <PriorityBadge priority={item.priority} /> },
+    { key: "type", header: "Type", width: "10%", render: (item: any) => <TypeBadge type={item.type} /> },
+    { key: "team", header: "Team", width: "14%", render: (item: any) => <span>{teamNames.get(item.teamId) ?? shortId(item.teamId)}</span> },
+    { key: "assignee", header: "Assignee", width: "14%", render: (item: any) => <AssigneeLabel assigneeId={item.assigneeId} currentUserId={user?.id} /> },
+    { key: "due", header: "Due", width: "12%", render: (item: any) => {
+      const overdue = isOverdue(item.dueAt);
+      return item.dueAt ? (
+        <span className={overdue ? "text-danger" : undefined}>
+          {formatDate(item.dueAt)}
+          {overdue && <span className="visually-hidden"> (overdue)</span>}
+          {overdue && <span aria-hidden="true"> · Overdue</span>}
+        </span>
+      ) : (
+        <span className="muted">—</span>
+      );
+    }},
+    { key: "updated", header: "Updated", width: "16%", render: (item: any) => <span className="muted">{formatDateTime(item.updatedAt)}</span> },
+  ];
+
   return (
     <div className="page">
       <div className="page__header">
@@ -222,185 +242,228 @@ export function ItemsPage() {
             Track and resolve operational work across your teams.
           </p>
         </div>
+        {/* Only rendered when at least one of the user's teams grants create. */}
+        {canCreate && (
+          <Link className="button button--primary" to="/items/new">
+            <PlusIcon width="16" height="16" className="mr-1" />
+            New work item
+          </Link>
+        )}
       </div>
 
-      <form className="filters" onSubmit={(event) => event.preventDefault()} aria-label="Work item filters">
-        <h2 className="visually-hidden">Filters</h2>
-
-        {/* Dashboard preset filters */}
-        <div className="filters__presets">
-          <span className="filters__preset-label">Quick filters:</span>
-          <button
-            type="button"
-            className={`button button--preset ${applied.preset === "assigned" ? "button--preset-active" : ""}`}
-            onClick={() => updateFilter("preset", applied.preset === "assigned" ? "" : "assigned")}
-            aria-pressed={applied.preset === "assigned"}
-            disabled={memberships.length === 0}
-          >
-            Assigned to me
-          </button>
-          <button
-            type="button"
-            className={`button button--preset ${applied.preset === "unassigned_urgent" ? "button--preset-active" : ""}`}
-            onClick={() => updateFilter("preset", applied.preset === "unassigned_urgent" ? "" : "unassigned_urgent")}
-            aria-pressed={applied.preset === "unassigned_urgent"}
-          >
-            Unassigned urgent
-          </button>
-          <button
-            type="button"
-            className={`button button--preset ${applied.preset === "awaiting_approval" ? "button--preset-active" : ""}`}
-            onClick={() => updateFilter("preset", applied.preset === "awaiting_approval" ? "" : "awaiting_approval")}
-            aria-pressed={applied.preset === "awaiting_approval"}
-            disabled={!memberships.some((m) => m.role === "LEAD" || m.role === "ADMIN")}
-          >
-            Awaiting my approval
-          </button>
-        </div>
-
-        <div className="filters__grid">
-          <FormField id="filter-team" label="Team">
-            {(props) => (
-              <select
-                {...props}
-                className="input"
-                value={applied.teamId}
-                onChange={(event) => updateFilter("teamId", event.target.value)}
+      <section className="card-shell">
+        <div className="card-core p-5">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-h3">Filters</h2>
+              <button
+                type="button"
+                className={`button button--ghost button--sm ${filtersOpen ? "" : "rotate-180"}`}
+                onClick={() => setFiltersOpen(!filtersOpen)}
+                aria-expanded={filtersOpen}
+                aria-controls="filters-panel"
               >
-                <option value="">All my teams</option>
-                {memberships.map((m) => (
-                  <option key={m.teamId} value={m.teamId}>
-                    {m.teamName}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <FormField id="filter-status" label="Status">
-            {(props) => (
-              <select
-                {...props}
-                className="input"
-                value={applied.status}
-                onChange={(event) => updateFilter("status", event.target.value as WorkStatus | "")}
-              >
-                <option value="">Any status</option>
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <FormField id="filter-priority" label="Priority">
-            {(props) => (
-              <select
-                {...props}
-                className="input"
-                value={applied.priority}
-                onChange={(event) =>
-                  updateFilter("priority", event.target.value as WorkPriority | "")
-                }
-              >
-                <option value="">Any priority</option>
-                {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <FormField
-            id="filter-assignee"
-            label="Assignee ID"
-            hint="Exact user ID (UUID) of the assignee."
-            error={assigneeInvalid ? "Enter a full user ID (UUID)." : null}
-          >
-            {(props) => (
-              <input
-                {...props}
-                className="input"
-                type="text"
-                spellCheck={false}
-                value={text.assigneeId}
-                onChange={(event) =>
-                  setText((prev) => ({ ...prev, assigneeId: event.target.value }))
-                }
-              />
-            )}
-          </FormField>
-
-          <FormField id="filter-search" label="Search">
-            {(props) => (
-              <input
-                {...props}
-                className="input"
-                type="search"
-                placeholder="Title or description"
-                value={text.search}
-                onChange={(event) => setText((prev) => ({ ...prev, search: event.target.value }))}
-              />
-            )}
-          </FormField>
-
-          <FormField id="filter-sort" label="Sort by">
-            {(props) => (
-              <select
-                {...props}
-                className="input"
-                value={`${applied.sort}:${applied.order}`}
-                onChange={(event) => {
-                  const [sort, order] = event.target.value.split(":") as [SortField, SortDirection];
-                  setApplied((prev) => ({ ...prev, sort, order, page: 1 }));
-                }}
-              >
-                <option value="updatedAt:desc">Recently updated</option>
-                <option value="updatedAt:asc">Least recently updated</option>
-                <option value="createdAt:desc">Newest first</option>
-                <option value="createdAt:asc">Oldest first</option>
-                <option value="priority:desc">Highest priority</option>
-                <option value="dueAt:asc">Due soonest</option>
-              </select>
-            )}
-          </FormField>
-
-          <FormField id="filter-page-size" label="Per page">
-            {(props) => (
-              <select
-                {...props}
-                className="input"
-                value={String(applied.pageSize)}
-                onChange={(event) => updateFilter("pageSize", Number(event.target.value))}
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <div className="filters__actions">
-            <button
-              type="button"
-              className="button"
-              onClick={clearFilters}
-              disabled={!hasActiveFilters && applied.pageSize === DEFAULT_PAGE_SIZE}
-            >
-              Clear filters
-            </button>
+                <FilterIcon width="16" height="16" />
+                {filtersOpen ? "Hide" : "Show"} filters
+                <ChevronDownIcon width="14" height="14" className="ml-1" style={{ transform: filtersOpen ? "rotate(180deg)" : "rotate(0)" }} />
+              </button>
+            </div>
           </div>
+
+          <form
+            id="filters-panel"
+            className="filters"
+            onSubmit={(event) => event.preventDefault()}
+            aria-label="Work item filters"
+            style={{ display: filtersOpen ? "block" : "none" }}
+          >
+            {/* Dashboard preset filters */}
+            <div className="filters__presets">
+              <span className="filters__preset-label">Quick filters:</span>
+              <button
+                type="button"
+                className={`button button--preset ${applied.preset === "assigned" ? "button--preset-active" : ""}`}
+                onClick={() => updateFilter("preset", applied.preset === "assigned" ? "" : "assigned")}
+                aria-pressed={applied.preset === "assigned"}
+                disabled={memberships.length === 0}
+              >
+                Assigned to me
+              </button>
+              <button
+                type="button"
+                className={`button button--preset ${applied.preset === "unassigned_urgent" ? "button--preset-active" : ""}`}
+                onClick={() => updateFilter("preset", applied.preset === "unassigned_urgent" ? "" : "unassigned_urgent")}
+                aria-pressed={applied.preset === "unassigned_urgent"}
+              >
+                Unassigned urgent
+              </button>
+              <button
+                type="button"
+                className={`button button--preset ${applied.preset === "awaiting_approval" ? "button--preset-active" : ""}`}
+                onClick={() => updateFilter("preset", applied.preset === "awaiting_approval" ? "" : "awaiting_approval")}
+                aria-pressed={applied.preset === "awaiting_approval"}
+                disabled={!memberships.some((m) => m.role === "LEAD" || m.role === "ADMIN")}
+              >
+                Awaiting my approval
+              </button>
+            </div>
+
+            <div className="filters__grid">
+              <FormField id="filter-team" label="Team">
+                {(props) => (
+                  <select
+                    {...props}
+                    className="input"
+                    value={applied.teamId}
+                    onChange={(event) => updateFilter("teamId", event.target.value)}
+                  >
+                    <option value="">All my teams</option>
+                    {memberships.map((m) => (
+                      <option key={m.teamId} value={m.teamId}>
+                        {m.teamName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <FormField id="filter-status" label="Status">
+                {(props) => (
+                  <select
+                    {...props}
+                    className="input"
+                    value={applied.status}
+                    onChange={(event) => updateFilter("status", event.target.value as WorkStatus | "")}
+                  >
+                    <option value="">Any status</option>
+                    {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <FormField id="filter-priority" label="Priority">
+                {(props) => (
+                  <select
+                    {...props}
+                    className="input"
+                    value={applied.priority}
+                    onChange={(event) =>
+                      updateFilter("priority", event.target.value as WorkPriority | "")
+                    }
+                  >
+                    <option value="">Any priority</option>
+                    {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <FormField
+                id="filter-assignee"
+                label="Assignee ID"
+                hint="Exact user ID (UUID) of the assignee."
+                error={assigneeInvalid ? "Enter a full user ID (UUID)." : null}
+              >
+                {(props) => (
+                  <input
+                    {...props}
+                    className="input"
+                    type="text"
+                    spellCheck={false}
+                    value={text.assigneeId}
+                    onChange={(event) =>
+                      setText((prev) => ({ ...prev, assigneeId: event.target.value }))
+                    }
+                  />
+                )}
+              </FormField>
+
+              <FormField id="filter-search" label="Search">
+                {(props) => (
+                  <div className="relative">
+                    <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] pointer-events-none" width="18" height="18" />
+                    <input
+                      {...props}
+                      className="input pl-10"
+                      type="search"
+                      placeholder="Title or description"
+                      value={text.search}
+                      onChange={(event) => setText((prev) => ({ ...prev, search: event.target.value }))}
+                    />
+                  </div>
+                )}
+              </FormField>
+
+              <FormField id="filter-sort" label="Sort by">
+                {(props) => (
+                  <select
+                    {...props}
+                    className="input"
+                    value={`${applied.sort}:${applied.order}`}
+                    onChange={(event) => {
+                      const [sort, order] = event.target.value.split(":") as [SortField, SortDirection];
+                      setApplied((prev) => ({ ...prev, sort, order, page: 1 }));
+                    }}
+                  >
+                    <option value="updatedAt:desc">Recently updated</option>
+                    <option value="updatedAt:asc">Least recently updated</option>
+                    <option value="createdAt:desc">Newest first</option>
+                    <option value="createdAt:asc">Oldest first</option>
+                    <option value="priority:desc">Highest priority</option>
+                    <option value="dueAt:asc">Due soonest</option>
+                  </select>
+                )}
+              </FormField>
+
+              <FormField id="filter-page-size" label="Per page">
+                {(props) => (
+                  <select
+                    {...props}
+                    className="input"
+                    value={String(applied.pageSize)}
+                    onChange={(event) => updateFilter("pageSize", Number(event.target.value))}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+            </div>
+
+            <div className="filters__actions flex items-center gap-3 flex-wrap">
+              <button
+                type="button"
+                className="button"
+                onClick={clearFilters}
+                disabled={!hasActiveFilters && applied.pageSize === DEFAULT_PAGE_SIZE}
+              >
+                <XIcon width="16" height="16" className="mr-1" />
+                Clear filters
+              </button>
+            </div>
+          </form>
         </div>
-      </form>
+      </section>
 
       <section className="results" aria-busy={itemsQuery.isFetching}>
-        {itemsQuery.isPending && !data && <LoadingState message="Loading work items…" />}
+        {itemsQuery.isPending && !data && (
+          <div className="card-shell">
+            <div className="card-core p-12 text-center">
+              <Loader2Icon width="48" height="48" className="mx-auto mb-4 animate-spin text-[var(--color-primary)]" />
+              <p className="text-body text-[var(--color-text-secondary)]">Loading work items…</p>
+            </div>
+          </div>
+        )}
 
         {itemsQuery.isError && !data && (
           <ErrorState
@@ -411,25 +474,35 @@ export function ItemsPage() {
         )}
 
         {data && data.items.length === 0 && (
-          <EmptyState
-            title={hasActiveFilters ? "No items match your filters" : "No work items yet"}
-            message={
-              hasActiveFilters
-                ? "Try widening your filters or clearing them."
-                : "Work items created in your teams will appear here."
-            }
-            action={
-              hasActiveFilters ? (
-                <button type="button" className="button" onClick={clearFilters}>
-                  Clear filters
-                </button>
-              ) : canCreate ? (
-                <Link to="/items/new" className="button button--primary">
-                  Create the first work item
-                </Link>
-              ) : undefined
-            }
-          />
+          <div className="card-shell">
+            <div className="card-core p-12 text-center">
+              <div className="state state--full">
+                {hasActiveFilters ? (
+                  <>
+                    <p className="state__title">No items match your filters</p>
+                    <p className="state__message">Try widening your filters or clearing them.</p>
+                    <div className="state__actions">
+                      <button type="button" className="button button--primary" onClick={clearFilters}>
+                        Clear filters
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="state__title">No work items yet</p>
+                    <p className="state__message">Work items created in your teams will appear here.</p>
+                    {canCreate && (
+                      <div className="state__actions">
+                        <Link to="/items/new" className="button button--primary">
+                          Create the first work item
+                        </Link>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {data && data.items.length > 0 && (
@@ -442,66 +515,15 @@ export function ItemsPage() {
               />
             )}
 
-            <div className="table-wrap">
-              <table className="table">
-                <caption className="visually-hidden">
-                  Work items{hasActiveFilters ? " matching your filters" : ""}
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Title</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Priority</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Team</th>
-                    <th scope="col">Assignee</th>
-                    <th scope="col">Due</th>
-                    <th scope="col">Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((item) => {
-                    const overdue = isOverdue(item.dueAt);
-                    return (
-                      <tr key={item.id}>
-                        <th scope="row" className="table__title-cell">
-                          <Link to={`/items/${item.id}`} className="table__title-link">
-                            {item.title}
-                          </Link>
-                        </th>
-                        <td>
-                          <StatusBadge status={item.status} />
-                        </td>
-                        <td>
-                          <PriorityBadge priority={item.priority} />
-                        </td>
-                        <td>
-                          <TypeBadge type={item.type} />
-                        </td>
-                        <td>{teamNames.get(item.teamId) ?? shortId(item.teamId)}</td>
-                        <td>
-                          <AssigneeLabel assigneeId={item.assigneeId} currentUserId={user?.id} />
-                        </td>
-                        <td>
-                          {item.dueAt ? (
-                            <span className={overdue ? "text-danger" : undefined}>
-                              {formatDate(item.dueAt)}
-                              {overdue && <span className="visually-hidden"> (overdue)</span>}
-                              {overdue && <span aria-hidden="true"> · Overdue</span>}
-                            </span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td className="muted">{formatDateTime(item.updatedAt)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <Table
+              data={data.items}
+              columns={columns}
+              keyField="id"
+              onRowClick={(item) => navigate(`/items/${item.id}`)}
+              loading={itemsQuery.isFetching}
+            />
 
-            <Pagination
+            <TablePagination
               pagination={data.pagination}
               onPageChange={setPage}
               busy={itemsQuery.isFetching}
@@ -510,7 +532,8 @@ export function ItemsPage() {
         )}
 
         {itemsQuery.isFetching && data && (
-          <p className="muted refreshing" aria-live="polite">
+          <p className="muted refreshing text-center py-4" aria-live="polite">
+            <Loader2Icon width="16" height="16" className="inline-block animate-spin mr-2" />
             Updating results…
           </p>
         )}
@@ -519,7 +542,6 @@ export function ItemsPage() {
   );
 }
 
-/** Show the assignee as "Unassigned", "You", or a compact id (no user directory exists). */
 function AssigneeLabel({
   assigneeId,
   currentUserId,

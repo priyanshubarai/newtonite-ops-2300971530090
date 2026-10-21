@@ -1,25 +1,24 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listItems } from "../api/items";
 import type { ItemFilters, SortDirection, SortField, WorkPriority, WorkStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { PriorityBadge, StatusBadge, TypeBadge } from "../components/Badges";
-import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
-import { FormField } from "../components/FormField";
+import { ErrorState, LoadingState } from "../components/StateViews";
+import { Input, Select } from "../components/ui/Input";
 import { Pagination } from "../components/Pagination";
 import {
   DEFAULT_PAGE_SIZE,
-  PAGE_SIZE_OPTIONS,
   PRIORITY_LABELS,
   STATUS_LABELS,
   SORT_FIELDS,
   SORT_DIRECTIONS,
 } from "../lib/constants";
-import { formatDate, formatDateTime, isOverdue, isUuid, shortId } from "../lib/format";
+import { shortId } from "../lib/format";
 import { errorMessage } from "../lib/apiErrors";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { canApproveTransition, roleForTeam } from "../lib/permissions";
+import { canApproveTransition } from "../lib/permissions";
 
 interface AppliedFilters {
   teamId: string;
@@ -60,8 +59,9 @@ function buildSortValue(sort: SortField, order: SortDirection): string {
 }
 
 export function AwaitingApprovalPage() {
-  const { memberships, user } = useAuth();
+  const { memberships } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [initialized, setInitialized] = useState(false);
   const [text, setText] = useState({ search: "", assigneeId: "" });
@@ -205,69 +205,48 @@ export function AwaitingApprovalPage() {
 
       <section className="filters" aria-label="Filters">
         <div className="filters__grid">
-          <FormField
+          <Input
+            id="approval-search"
+            type="search"
+            placeholder="Title or description…"
+            value={text.search}
+            onChange={(e) => setText((prev) => ({ ...prev, search: e.target.value }))}
             label="Search"
-            htmlFor="approval-search"
             hint="Search by title or description"
-          >
-            <input
-              type="search"
-              id="approval-search"
-              className="input"
-              placeholder="Title or description…"
-              value={text.search}
-              onChange={(e) => setText((prev) => ({ ...prev, search: e.target.value }))}
-              aria-describedby="approval-search-hint"
-            />
-          </FormField>
+          />
 
-          <FormField label="Team" htmlFor="approval-team">
-            <select
-              id="approval-team"
-              className="input"
-              value={applied.teamId}
-              onChange={(e) => handleFilterChange("teamId", e.target.value)}
-            >
-              <option value="">All teams</option>
-              {memberships.filter((m) => canApproveTransition(m.role)).map((m) => (
-                <option key={m.teamId} value={m.teamId}>
-                  {m.teamName}
-                </option>
-              ))}
-            </select>
-          </FormField>
+          <Select
+            id="approval-team"
+            value={applied.teamId}
+            onChange={(e) => handleFilterChange("teamId", e.target.value)}
+            label="Team"
+            options={[
+              { value: "", label: "All teams" },
+              ...memberships.filter((m) => canApproveTransition(m.role)).map((m) => ({ value: m.teamId, label: m.teamName })),
+            ]}
+          />
 
-          <FormField label="Status" htmlFor="approval-status">
-            <select
-              id="approval-status"
-              className="input"
-              value={applied.status}
-              onChange={(e) => handleFilterChange("status", e.target.value)}
-            >
-              <option value="">All statuses</option>
-              {(Object.entries(STATUS_LABELS) as [WorkStatus, string][]).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </FormField>
+          <Select
+            id="approval-status"
+            value={applied.status}
+            onChange={(e) => handleFilterChange("status", e.target.value as WorkStatus | "")}
+            label="Status"
+            options={[
+              { value: "", label: "All statuses" },
+              ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+            ]}
+          />
 
-          <FormField label="Priority" htmlFor="approval-priority">
-            <select
-              id="approval-priority"
-              className="input"
-              value={applied.priority}
-              onChange={(e) => handleFilterChange("priority", e.target.value)}
-            >
-              <option value="">All priorities</option>
-              {(Object.entries(PRIORITY_LABELS) as [WorkPriority, string][]).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </FormField>
+          <Select
+            id="approval-priority"
+            value={applied.priority}
+            onChange={(e) => handleFilterChange("priority", e.target.value as WorkPriority | "")}
+            label="Priority"
+            options={[
+              { value: "", label: "All priorities" },
+              ...Object.entries(PRIORITY_LABELS).map(([value, label]) => ({ value, label })),
+            ]}
+          />
         </div>
 
         <div className="filters__actions" style={{ marginTop: "var(--space-3)", display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
@@ -337,11 +316,11 @@ export function AwaitingApprovalPage() {
                 </tr>
               ) : (
                 items.map((item) => (
-                  <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => window.location.href = `/items/${item.id}`}>
+                  <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/items/${item.id}`)}>
                     <td className="table__title-cell">
-                      <a className="table__title-link" href={`/items/${item.id}`} onClick={(e) => e.stopPropagation()}>
+                      <Link className="table__title-link" to={`/items/${item.id}`} onClick={(e) => e.stopPropagation()}>
                         {item.title}
-                      </a>
+                      </Link>
                       <span className="mono muted" style={{ marginLeft: "var(--space-2)" }}>
                         {shortId(item.id)}
                       </span>

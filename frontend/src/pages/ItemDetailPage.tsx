@@ -17,6 +17,7 @@ import {
 } from "../lib/constants";
 import { errorMessage, isForbidden, isNotFound } from "../lib/apiErrors";
 import { formatDateTime, isOverdue, shortId } from "../lib/format";
+import { reticleSignal } from "../lib/reticleSignal";
 import {
   canApproveTransition,
   canClaimItem,
@@ -82,6 +83,7 @@ export function ItemDetailPage() {
       setActionError(null);
       setNeedsReload(false);
       setActionMessage("You claimed this work item.");
+      reticleSignal("item.claimed", { id, assigneeId: updated.assigneeId });
     },
     onError: async (error) => {
       setActionMessage(null);
@@ -112,6 +114,7 @@ export function ItemDetailPage() {
       setActionError(null);
       setNeedsReload(false);
       setActionMessage(`Moved to ${STATUS_LABELS[updated.status]}.`);
+      reticleSignal("item.status-changed", { id, status: updated.status });
     },
     onError: (error) => {
       setActionMessage(null);
@@ -138,10 +141,11 @@ export function ItemDetailPage() {
   const commentKey = useStableIdempotencyKey(`comment:${id}`);
   const commentMutation = useMutation({
     mutationFn: (body: string) => createComment(id, { body }, commentKey),
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["comments", id] });
       setActionError(null);
       setActionMessage("Comment added.");
+      reticleSignal("comment.created", { itemId: id, commentId: response?.comment?.id });
     },
     onError: (error) => {
       setActionMessage(null);

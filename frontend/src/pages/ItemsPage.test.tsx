@@ -3,7 +3,6 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { installFetchMock } from "../test/mockFetch";
 import {
-  LEAD_MEMBERSHIP,
   VIEWER_MEMBERSHIP,
   TEAM_PAYMENTS,
   makeItem,
@@ -51,7 +50,7 @@ describe("ItemsPage", () => {
 
     expect(await screen.findByText("No work items yet")).toBeInTheDocument();
     // The create link in the empty state (not the header)
-    const emptyState = screen.getByText("No work items yet").closest(".state")!;
+    const emptyState = screen.getByText("No work items yet").closest(".state")! as HTMLElement;
     expect(within(emptyState).getByRole("link", { name: /create the first work item/i })).toBeInTheDocument();
   });
 
@@ -86,7 +85,7 @@ describe("ItemsPage", () => {
     const emptyStateClearButton = emptyStateContainer.closest(".state")?.querySelector('button');
     expect(emptyStateClearButton).toBeInTheDocument();
     // The create link in the empty state should not be present for filtered-empty
-    const filteredEmptyState = screen.getByText(/no items match your filters/i).closest(".state")!;
+    const filteredEmptyState = screen.getByText(/no items match your filters/i).closest(".state")! as HTMLElement;
     expect(within(filteredEmptyState).queryByRole("link", { name: /create the first work item/i })).not.toBeInTheDocument();
   });
 

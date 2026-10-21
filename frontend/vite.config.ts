@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 import { reticle } from '@reticlehq/vite-plugin';
 // The frontend talks to the Express API through the same-origin `/api` prefix.
@@ -8,7 +9,10 @@ import { reticle } from '@reticlehq/vite-plugin';
 // required. Point VITE_API_URL at a full URL only when the API is served
 // elsewhere.
 export default defineConfig({
-  plugins: [reticle(), react()],
+  // `captureNetworkBodies` lets Reticle prove WRITE outcomes: a 2xx on a POST
+  // describes the transport, not the result, so without the body a mutation
+  // verdict can only be "unknown". Reticle redacts known credential fields.
+  plugins: [reticle({ captureNetworkBodies: true }), react(), tailwindcss()],
   server: {
     port: 5173,
     proxy: {

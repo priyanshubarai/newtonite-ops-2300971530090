@@ -45,7 +45,9 @@ export interface WorkItem {
   priority: WorkPriority;
   status: WorkStatus;
   teamId: string;
+  teamName?: string;
   assigneeId: string | null;
+  assigneeName?: string | null;
   createdBy: string;
   dueAt: string | null;
   version: number;

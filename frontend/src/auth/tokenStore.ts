@@ -14,10 +14,7 @@
 
 const STORAGE_KEY = "newtonite_auth_token";
 
-let token: string | null = null;
-const listeners = new Set<() => void>();
-
-/** Read the token from localStorage on first load. */
+/** Read the token from localStorage. */
 function readStoredToken(): string | null {
   try {
     return localStorage.getItem(STORAGE_KEY);
@@ -27,7 +24,32 @@ function readStoredToken(): string | null {
   }
 }
 
-/** Initialize in-memory token from localStorage. */
+/**
+ * The in-memory token, hydrated from localStorage *synchronously at module
+ * load*.
+ *
+ * This ordering matters. The route guard decides between "redirect to /login"
+ * and "render the app" during render, and `useSyncExternalStore` reads this
+ * value on the very first render. If hydration happened later (e.g. in a
+ * `useEffect`), the first render of a reloaded page would report "no token",
+ * `RequireAuth` would redirect a perfectly valid session to /login, and only
+ * the next render would send the user back. That produced a visible login flash
+ * on every hard page load. Reading storage here means a reload with a stored
+ * token is authenticated from the first paint.
+ *
+ * `readStoredToken` is total (it catches storage failures and returns null), so
+ * this cannot throw during module evaluation.
+ */
+let token: string | null = readStoredToken();
+const listeners = new Set<() => void>();
+
+/**
+ * Re-read the token from localStorage.
+ *
+ * Kept as a no-op-on-match reconciliation step: storage can change outside this
+ * module (another tab, or a test manipulating localStorage directly), and
+ * calling this resyncs the in-memory value.
+ */
 export function initializeToken(): void {
   const stored = readStoredToken();
   if (stored !== token) {

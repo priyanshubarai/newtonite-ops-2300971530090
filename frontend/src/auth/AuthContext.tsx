@@ -42,7 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const token = useSyncExternalStore(subscribeToken, getToken, getToken);
   const queryClient = useQueryClient();
 
-  // Initialize token from localStorage on first render
+  // The token is hydrated synchronously by `tokenStore` at module load, so there
+  // is no "storage not read yet" window after this. This call reconciles the
+  // in-memory value with storage on mount, which matters if storage changed
+  // outside this module (another tab, a test writing localStorage directly).
   useEffect(() => {
     initializeToken();
   }, []);
@@ -82,7 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(() => {
     let status: SessionStatus;
-    if (!token) status = "anonymous";
+    // Order matters. "anonymous" is a positive statement (there is definitely no
+    // token), so it is decided only from `token === null`. A token being present
+    // but `/auth/me` still in flight is "loading", which the guard renders as a
+    // loading state rather than a redirect — that is what stops a valid session
+    // from being bounced to /login while its user is still being fetched.
+    if (token === null) status = "anonymous";
     else if (isPending) status = "loading";
     else if (isError) status = "error";
     else status = "authenticated";
