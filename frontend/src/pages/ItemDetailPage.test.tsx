@@ -321,4 +321,186 @@ describe("ItemDetailPage", () => {
     // Item should be re-fetched to show current state
     await waitFor(() => expect(mock.requestsFor("GET", `/items/${item.id}`).length).toBeGreaterThan(1), { timeout: 10000 });
   });
+
+  describe("Comment submission", () => {
+    it("posts first comment successfully and clears the form", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item);
+
+      const createdComment = {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        workItemId: item.id,
+        authorId: TEST_USER.id,
+        body: "First comment",
+        createdAt: "2026-10-21T10:00:00.000Z",
+        updatedAt: "2026-10-21T10:00:00.000Z",
+      };
+      mock.on("POST", `/items/${item.id}/comments`, () => ({
+        status: 201,
+        body: { comment: createdComment },
+      }));
+
+      const user = userEvent.setup();
+      const textarea = screen.getByLabelText(/add a comment/i);
+      await user.type(textarea, "First comment");
+      await user.click(screen.getByRole("button", { name: /post comment/i }));
+
+      await waitFor(() => expect(mock.requestsFor("POST", `/items/${item.id}/comments`)).toHaveLength(1));
+      const request = mock.requestsFor("POST", `/items/${item.id}/comments`)[0];
+      expect(request.headers["Idempotency-Key"]).toBeTruthy();
+      expect(request.body).toEqual({ body: "First comment" });
+
+      expect(await screen.findByText(/comment added/i)).toBeInTheDocument();
+      // Form should be cleared
+      expect(textarea).toHaveValue("");
+    });
+
+    it("posts second different comment successfully with a different idempotency key", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item);
+
+      const comment1 = {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        workItemId: item.id,
+        authorId: TEST_USER.id,
+        body: "First comment",
+        createdAt: "2026-10-21T10:00:00.000Z",
+        updatedAt: "2026-10-21T10:00:00.000Z",
+      };
+      const comment2 = {
+        id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        workItemId: item.id,
+        authorId: TEST_USER.id,
+        body: "Second comment",
+        createdAt: "2026-10-21T10:01:00.000Z",
+        updatedAt: "2026-10-21T10:01:00.000Z",
+      };
+
+      let callCount = 0;
+      mock.on("POST", `/items/${item.id}/comments`, () => {
+        callCount++;
+        if (callCount === 1) {
+          return { status: 201, body: { comment: comment1 } };
+        }
+        return { status: 201, body: { comment: comment2 } };
+      });
+
+      const user = userEvent.setup();
+      const textarea = screen.getByLabelText(/add a comment/i);
+
+      // First comment
+      await user.type(textarea, "First comment");
+      await user.click(screen.getByRole("button", { name: /post comment/i }));
+      await waitFor(() => expect(mock.requestsFor("POST", `/items/${item.id}/comments`)).toHaveLength(1));
+      const key1 = mock.requestsFor("POST", `/items/${item.id}/comments`)[0].headers["Idempotency-Key"];
+
+      // Second comment - different text
+      await user.type(textarea, "Second comment");
+      await user.click(screen.getByRole("button", { name: /post comment/i }));
+      await waitFor(() => expect(mock.requestsFor("POST", `/items/${item.id}/comments`)).toHaveLength(2));
+      const key2 = mock.requestsFor("POST", `/items/${item.id}/comments`)[1].headers["Idempotency-Key"];
+
+      // Keys should be different for different comment bodies
+      expect(key1).not.toBe(key2);
+      expect(await screen.findByText(/comment added/i)).toBeInTheDocument();
+    });
+
+    it("reuses the same idempotency key when rapidly clicking post for the same comment", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item);
+
+      let resolveComment: (value: { status: number; body: unknown }) => void = () => {};
+      const commentPromise = new Promise<{ status: number; body: unknown }>((resolve) => {
+        resolveComment = resolve;
+      });
+      const createdComment = {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        workItemId: item.id,
+        authorId: TEST_USER.id,
+        body: "Rapid click comment",
+        createdAt: "2026-10-21T10:00:00.000Z",
+        updatedAt: "2026-10-21T10:00:00.000Z",
+      };
+      mock.on("POST", `/items/${item.id}/comments`, () => commentPromise);
+
+      const user = userEvent.setup();
+      const textarea = screen.getByLabelText(/add a comment/i);
+      await user.type(textarea, "Rapid click comment");
+      const postButton = screen.getByRole("button", { name: /post comment/i });
+      await user.click(postButton);
+      // Rapid second click before first completes
+      await user.click(postButton);
+
+      // Resolve the first request
+      resolveComment({ status: 201, body: { comment: createdComment } });
+
+      await waitFor(() => {
+        expect(mock.requestsFor("POST", `/items/${item.id}/comments`)).toHaveLength(1);
+        expect(mock.requestsFor("POST", `/items/${item.id}/comments`)[0].headers["Idempotency-Key"]).toBeTruthy();
+      });
+    });
+
+    it("preserves comment text on submission failure", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item);
+
+      mock.on("POST", `/items/${item.id}/comments`, () => ({
+        status: 500,
+        body: { error: "Internal server error" },
+      }));
+
+      const user = userEvent.setup();
+      const textarea = screen.getByLabelText(/add a comment/i);
+      await user.type(textarea, "Comment that will fail");
+      await user.click(screen.getByRole("button", { name: /post comment/i }));
+
+      await waitFor(() => expect(screen.findByText(/internal server error/i)));
+      // Text should be preserved
+      expect(textarea).toHaveValue("Comment that will fail");
+    });
+
+    it("shows permission error when user cannot add comments", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item, [VIEWER_MEMBERSHIP]);
+
+      mock.on("POST", `/items/${item.id}/comments`, () => ({
+        status: 403,
+        body: { error: "Forbidden" },
+      }));
+
+      const user = userEvent.setup();
+      const textarea = screen.getByLabelText(/add a comment/i);
+      await user.type(textarea, "Comment from viewer");
+      await user.click(screen.getByRole("button", { name: /post comment/i }));
+
+      await waitFor(() => expect(screen.findByText(/doesn't allow adding comments/i)));
+      // Text should be preserved
+      expect(textarea).toHaveValue("Comment from viewer");
+    });
+
+    it("disables post button when comment is empty or pending", async () => {
+      const mock = installFetchMock();
+      const item = makeItem({ status: "OPEN" });
+      await renderDetail(mock, item);
+
+      const postButton = screen.getByRole("button", { name: /post comment/i });
+      const textarea = screen.getByLabelText(/add a comment/i);
+
+      // Initially disabled (empty)
+      expect(postButton).toBeDisabled();
+
+      // Type something - should be enabled
+      await userEvent.type(textarea, "Test");
+      expect(postButton).not.toBeDisabled();
+
+      // Clear - should be disabled again
+      await userEvent.clear(textarea);
+      expect(postButton).toBeDisabled();
+    });
+  });
 });

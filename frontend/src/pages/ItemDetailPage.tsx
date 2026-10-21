@@ -69,11 +69,13 @@ export function ItemDetailPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [needsReload, setNeedsReload] = useState(false);
+  const [commentText, setCommentText] = useState("");
 
   const claimKey = useStableIdempotencyKey(`claim:${id}`);
   const transitionKey = useStableIdempotencyKey(
     `transition:${id}:${next ?? "none"}:${item?.version ?? 0}`,
   );
+  const commentKey = useStableIdempotencyKey(`comment:${id}:${commentText}`);
 
   const claimMutation = useMutation({
     mutationFn: () => claimItem(id, claimKey),
@@ -138,7 +140,6 @@ export function ItemDetailPage() {
     },
   });
 
-  const commentKey = useStableIdempotencyKey(`comment:${id}`);
   const commentMutation = useMutation({
     mutationFn: (body: string) => createComment(id, { body }, commentKey),
     onSuccess: (response) => {
@@ -146,6 +147,8 @@ export function ItemDetailPage() {
       setActionError(null);
       setActionMessage("Comment added.");
       reticleSignal("comment.created", { itemId: id, commentId: response?.comment?.id });
+      // Clear the comment text state after successful submission
+      setCommentText("");
     },
     onError: (error) => {
       setActionMessage(null);
@@ -477,11 +480,9 @@ export function ItemDetailPage() {
           className="comment-form"
           onSubmit={(e) => {
             e.preventDefault();
-            const formData = new FormData(e.currentTarget);
-            const body = formData.get("body") as string;
-            if (body.trim()) {
+            const body = commentText.trim();
+            if (body) {
               commentMutation.mutate(body);
-              e.currentTarget.reset();
             }
           }}
         >
@@ -499,12 +500,14 @@ export function ItemDetailPage() {
               aria-busy={commentMutation.isPending}
               required
               maxLength={5000}
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
             />
           </div>
           <button
             type="submit"
             className="button button--primary"
-            disabled={commentMutation.isPending || !item}
+            disabled={commentMutation.isPending || !item || !commentText.trim()}
             aria-busy={commentMutation.isPending}
           >
             {commentMutation.isPending ? "Posting…" : "Post comment"}
