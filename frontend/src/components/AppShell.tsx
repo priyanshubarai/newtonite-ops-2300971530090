@@ -2,7 +2,7 @@
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABELS } from '../lib/constants';
 import { useEffect, useRef, useState } from 'react';
-import { useToast } from './ui/Toast';
+import { toast } from 'sonner';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { SidebarProfile } from './SidebarProfile';
 
@@ -168,7 +168,6 @@ export function AppShell() {
   const { user, memberships, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { addToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -238,7 +237,9 @@ export function AppShell() {
 
   const handleSignOut = () => {
     signOut();
-    addToast({ title: 'Signed out', message: 'You have been signed out successfully', type: 'success' });
+    toast.success('Signed out', {
+      description: 'You have been signed out successfully',
+    });
   };
 
   return (

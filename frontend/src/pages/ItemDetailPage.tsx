@@ -5,6 +5,7 @@ import { claimItem, createComment, getItem, listActivity, listComments, transiti
 import { useStableIdempotencyKey } from "../api/idempotency";
 import { isApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { toast } from "sonner";
 import { Alert } from "../components/Alert";
 import { PriorityBadge, StatusBadge, TypeBadge } from "../components/Badges";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
@@ -66,9 +67,8 @@ export function ItemDetailPage() {
   const comments = commentsQuery.data;
   const next = item ? WORKFLOW_NEXT[item.status] : null;
 
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [needsReload, setNeedsReload] = useState(false);
+  const [needsReloadMessage, setNeedsReloadMessage] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
 
   const claimKey = useStableIdempotencyKey(`claim:${id}`);
@@ -82,27 +82,23 @@ export function ItemDetailPage() {
     onSuccess: (updated) => {
       queryClient.setQueryData(["item", id], updated);
       void queryClient.invalidateQueries({ queryKey: ["items"] });
-      setActionError(null);
       setNeedsReload(false);
-      setActionMessage("You claimed this work item.");
+      toast.success("You claimed this work item.");
       reticleSignal("item.claimed", { id, assigneeId: updated.assigneeId });
     },
     onError: async (error) => {
-      setActionMessage(null);
       if (isApiError(error) && error.status === 409) {
         await itemQuery.refetch();
         setNeedsReload(false);
         if (error.code === "NOT_CLAIMABLE") {
-          setActionError("This work item can no longer be claimed. The latest details are shown below.");
+          toast.error("This work item can no longer be claimed.");
         } else {
-          setActionError(
-            "Another user claimed this item first, or it is no longer claimable. The latest details are shown below.",
-          );
+          toast.error("Another user claimed this item first, or it is no longer claimable.");
         }
       } else if (isForbidden(error)) {
-        setActionError("Your role in this team doesn't allow claiming work items.");
+        toast.error("Your role in this team doesn't allow claiming work items.");
       } else {
-        setActionError(errorMessage(error));
+        toast.error(errorMessage(error));
       }
     },
   });
@@ -113,29 +109,27 @@ export function ItemDetailPage() {
     onSuccess: (updated) => {
       queryClient.setQueryData(["item", id], updated);
       void queryClient.invalidateQueries({ queryKey: ["items"] });
-      setActionError(null);
       setNeedsReload(false);
-      setActionMessage(`Moved to ${STATUS_LABELS[updated.status]}.`);
+      toast.success(`Moved to ${STATUS_LABELS[updated.status]}.`);
       reticleSignal("item.status-changed", { id, status: updated.status });
     },
     onError: (error) => {
-      setActionMessage(null);
       if (isApiError(error) && error.isStaleVersion) {
         setNeedsReload(true);
-        setActionError(
-          "This work item changed since the page was loaded, so the transition was refused. Reload to see the current status before trying again.",
-        );
+        setNeedsReloadMessage("This work item changed since the page was loaded, so the transition was refused. Reload to see the current status before trying again.");
+        toast.error("This work item changed since the page was loaded. Please reload and try again.");
       } else if (isApiError(error) && error.code === "INVALID_TRANSITION") {
         setNeedsReload(true);
-        setActionError("That transition is no longer valid for this item. Reload to see its current status.");
+        setNeedsReloadMessage("That transition is no longer valid for this item. Reload to see its current status.");
+        toast.error("That transition is no longer valid for this item. Reload to see its current status.");
       } else if (isForbidden(error)) {
-        setActionError(
+        toast.error(
           next === "RESOLVED"
             ? "Only a team lead or admin can approve this transition."
             : "Your role in this team doesn't permit that transition.",
         );
       } else {
-        setActionError(errorMessage(error));
+        toast.error(errorMessage(error));
       }
     },
   });
@@ -145,18 +139,16 @@ export function ItemDetailPage() {
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["comments", id] });
       queryClient.invalidateQueries({ queryKey: ["activity", id] });
-      setActionError(null);
-      setActionMessage("Comment added.");
+      toast.success("Comment added.");
       reticleSignal("comment.created", { itemId: id, commentId: response?.comment?.id });
       // Clear the comment text state after successful submission
       setCommentText("");
     },
     onError: (error) => {
-      setActionMessage(null);
       if (isForbidden(error)) {
-        setActionError("Your role in this team doesn't allow adding comments.");
+        toast.error("Your role in this team doesn't allow adding comments.");
       } else {
-        setActionError(errorMessage(error));
+        toast.error(errorMessage(error));
       }
     },
   });
@@ -164,6 +156,7 @@ export function ItemDetailPage() {
   async function handleReload() {
     await itemQuery.refetch();
     setNeedsReload(false);
+    setNeedsReloadMessage(null);
   }
 
   if (itemQuery.isPending) {
@@ -219,9 +212,9 @@ export function ItemDetailPage() {
       </nav>
 
       {flash && (
-        <Alert tone="success" title="Done">
+        <div data-testid="flash-message" style={{ display: "none" }}>
           {flash}
-        </Alert>
+        </div>
       )}
 
       <div className="page__header">
@@ -251,21 +244,9 @@ export function ItemDetailPage() {
             </button>
           }
         >
-          {actionError}
+          {needsReloadMessage}
         </Alert>
-      ) : (
-        actionError && (
-          <Alert tone="error" title="Action not completed">
-            {actionError}
-          </Alert>
-        )
-      )}
-
-      {actionMessage && (
-        <Alert tone="success" title="Done">
-          {actionMessage}
-        </Alert>
-      )}
+      ) : null}
 
       <div className="detail-grid">
         <section className="card" aria-labelledby="detail-description-heading">

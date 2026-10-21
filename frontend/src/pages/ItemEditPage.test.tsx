@@ -78,7 +78,9 @@ describe("ItemEditPage", () => {
     await user.type(title, "My local edit");
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
-    expect(await screen.findByText(/changed while you were editing/i)).toBeInTheDocument();
+    // The conflict Alert appears with the warning tone
+    expect(await screen.findByText(/this item changed while you were editing/i)).toBeInTheDocument();
+    expect(await screen.findByText(/your edits are still here/i)).toBeInTheDocument();
     // No silent overwrite: the local edit is still in the form.
     expect(screen.getByLabelText(/title/i)).toHaveValue("My local edit");
 
@@ -114,6 +116,7 @@ describe("ItemEditPage", () => {
 
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
+    // Field-level validation error appears inline (not as a toast)
     expect(
       await screen.findByText("description must be at most 5000 characters"),
     ).toBeInTheDocument();

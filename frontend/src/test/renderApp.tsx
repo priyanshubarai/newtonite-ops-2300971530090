@@ -2,9 +2,9 @@ import type { ReactElement, ReactNode } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import App from "../App";
 import { AuthProvider } from "../auth/AuthContext";
-import { ToastProvider } from "../components/ui/Toast";
 
 /**
  * Render helpers. `renderApp` mounts the real route table inside a
@@ -37,9 +37,8 @@ export function renderWithProviders(
   const result = render(
     <MemoryRouter initialEntries={entries}>
       <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <AuthProvider>{ui}</AuthProvider>
-        </ToastProvider>
+        <AuthProvider>{ui}</AuthProvider>
+        <Toaster position="top-center" />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -56,9 +55,8 @@ export function withProviders(node: ReactNode, route = "/"): ReactElement {
   return (
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={createTestQueryClient()}>
-        <ToastProvider>
-          <AuthProvider>{node}</AuthProvider>
-        </ToastProvider>
+        <AuthProvider>{node}</AuthProvider>
+        <Toaster position="top-center" />
       </QueryClientProvider>
     </MemoryRouter>
   );

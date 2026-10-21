@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getItem, updateItem } from "../api/items";
 import { useStableIdempotencyKey } from "../api/idempotency";
 import { useAuth } from "../auth/AuthContext";
+import { toast } from "sonner";
 import { Alert } from "../components/Alert";
 import { ItemFormFields, type ItemFormValues } from "../components/ItemFormFields";
 import { ErrorState, LoadingState } from "../components/StateViews";
 import { StatusBadge } from "../components/Badges";
 import { isApiError } from "../api/client";
-import { errorMessage, fieldErrorsFrom, isForbidden, isNotFound } from "../lib/apiErrors";
+import { errorMessage, fieldErrorsFrom, isNotFound } from "../lib/apiErrors";
 import { itemToFormValues, toUpdateItemInput, validateItemForm } from "../lib/itemForm";
 import { roleForTeam, canEditItem } from "../lib/permissions";
 
@@ -38,7 +39,6 @@ export function ItemEditPage() {
   const [values, setValues] = useState<ItemFormValues | null>(null);
   const [expectedVersion, setExpectedVersion] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [reloadNotice, setReloadNotice] = useState<string | null>(null);
 
@@ -71,12 +71,13 @@ export function ItemEditPage() {
         setConflict(
           "This work item was changed by someone else after you opened it. Your edits are still here — reload the latest version, then review and save again.",
         );
-        setFormError(null);
         return;
       }
       const backendErrors = fieldErrorsFrom(error);
       setFieldErrors(backendErrors);
-      setFormError(Object.keys(backendErrors).length > 0 ? null : errorMessage(error));
+      if (Object.keys(backendErrors).length === 0) {
+        toast.error(errorMessage(error));
+      }
     },
   });
 
@@ -91,12 +92,10 @@ export function ItemEditPage() {
     const errors = validateItemForm(values);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setFormError(null);
       return;
     }
     setConflict(null);
     setReloadNotice(null);
-    setFormError(null);
     mutation.mutate({ version: expectedVersion });
   }
 
@@ -205,13 +204,6 @@ export function ItemEditPage() {
       {reloadNotice && (
         <Alert tone="info" title="Latest version loaded">
           {reloadNotice}
-        </Alert>
-      )}
-
-      {formError && (
-        <Alert tone="error" title="Couldn't save your changes">
-          {formError}
-          {isForbidden(mutation.error) ? " Your role doesn't permit this change." : ""}
         </Alert>
       )}
 

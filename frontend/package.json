@@ -17,7 +17,8 @@
     "lucide-react": "^1.59.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.1"
+    "react-router-dom": "^7.1.1",
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@reticlehq/react": "^3.7.0",

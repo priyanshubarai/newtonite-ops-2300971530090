@@ -13,6 +13,22 @@ import {
 import { renderApp } from "../test/renderApp";
 import { setToken } from "../auth/tokenStore";
 
+/** Helper to find Sonner toasts which render in a portal on document.body */
+function findToast(role: "alert" | "status", name: RegExp) {
+  // Sonner toasts render in a portal on document.body
+  // The toast element has data-sonner-toast attribute and contains an element with the role
+  return waitFor(() => {
+    const toasts = document.body.querySelectorAll('[data-sonner-toast]');
+    for (const toast of toasts) {
+      const roleElement = toast.querySelector(`[role="${role}"]`) || toast;
+      if (name.test(roleElement.textContent || "")) {
+        return roleElement;
+      }
+    }
+    throw new Error(`Toast with role "${role}" and name matching ${name} not found`);
+  });
+}
+
 const ITEM_PATH = /^\/items\/[0-9a-f-]{36}$/;
 
 async function renderDetail(
@@ -204,12 +220,12 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /claim this item/i }));
 
-    // The error appears in the alert with role="alert"
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/could not reach the server/i);
+    // The error appears as a Sonner toast with role="alert"
+    const toast = await screen.findByRole("alert", { name: /could not reach the server/i });
+    expect(toast).toBeInTheDocument();
     expect(screen.queryByText(/you claimed this work item/i)).not.toBeInTheDocument();
     // No success toast should appear
-    expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /comment added/i })).not.toBeInTheDocument();
   });
 
   it("shows a server error for claim when the server returns 500", async () => {
@@ -224,7 +240,9 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /claim this item/i }));
 
-    expect(await screen.findByText(/internal server error/i)).toBeInTheDocument();
+    // The error appears as a Sonner toast
+    const toast = await findToast("alert", /internal server error/i);
+    expect(toast).toBeInTheDocument();
     expect(screen.queryByText(/you claimed this work item/i)).not.toBeInTheDocument();
   });
 
@@ -239,11 +257,12 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /start progress/i }));
 
-    // The error appears in the alert with role="alert"
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/could not reach the server/i);
+    // The error appears as a Sonner toast with role="alert"
+    const toast = await findToast("alert", /could not reach the server/i);
+    expect(toast).toBeInTheDocument();
     expect(screen.queryByText(/moved to in progress/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("alert", { name: /done/i })).not.toBeInTheDocument();
+    // No success toast should appear
+    expect(screen.queryByRole("status", { name: /comment added/i })).not.toBeInTheDocument();
   });
 
   it("shows a server error for transition when the server returns 500", async () => {
@@ -258,7 +277,9 @@ describe("ItemDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: /start progress/i }));
 
-    expect(await screen.findByText(/internal server error/i)).toBeInTheDocument();
+    // The error appears as a Sonner toast
+    const toast = await findToast("alert", /internal server error/i);
+    expect(toast).toBeInTheDocument();
     expect(screen.queryByText(/moved to in progress/i)).not.toBeInTheDocument();
   });
 
@@ -351,7 +372,9 @@ describe("ItemDetailPage", () => {
       expect(request.headers["Idempotency-Key"]).toBeTruthy();
       expect(request.body).toEqual({ body: "First comment" });
 
-      expect(await screen.findByText(/comment added/i)).toBeInTheDocument();
+      // Success toast appears as a Sonner toast with role="status"
+      const toast = await findToast("status", /comment added/i);
+      expect(toast).toBeInTheDocument();
       // Form should be cleared
       expect(textarea).toHaveValue("");
     });
@@ -404,7 +427,9 @@ describe("ItemDetailPage", () => {
 
       // Keys should be different for different comment bodies
       expect(key1).not.toBe(key2);
-      expect(await screen.findByText(/comment added/i)).toBeInTheDocument();
+      // Second success toast appears
+      const toast = await findToast("status", /comment added/i);
+      expect(toast).toBeInTheDocument();
     });
 
     it("reuses the same idempotency key when rapidly clicking post for the same comment", async () => {
@@ -458,7 +483,9 @@ describe("ItemDetailPage", () => {
       await user.type(textarea, "Comment that will fail");
       await user.click(screen.getByRole("button", { name: /post comment/i }));
 
-      await waitFor(() => expect(screen.findByText(/internal server error/i)));
+      // Error toast appears as a Sonner toast with role="alert"
+      const toast = await findToast("alert", /internal server error/i);
+      expect(toast).toBeInTheDocument();
       // Text should be preserved
       expect(textarea).toHaveValue("Comment that will fail");
     });
@@ -478,7 +505,9 @@ describe("ItemDetailPage", () => {
       await user.type(textarea, "Comment from viewer");
       await user.click(screen.getByRole("button", { name: /post comment/i }));
 
-      await waitFor(() => expect(screen.findByText(/doesn't allow adding comments/i)));
+      // Error toast appears as a Sonner toast with role="alert"
+      const toast = await findToast("alert", /doesn't allow adding comments/i);
+      expect(toast).toBeInTheDocument();
       // Text should be preserved
       expect(textarea).toHaveValue("Comment from viewer");
     });

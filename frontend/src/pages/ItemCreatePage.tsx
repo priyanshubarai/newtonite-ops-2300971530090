@@ -6,7 +6,7 @@ import type { CreateItemInput } from "../api/types";
 import { useStableIdempotencyKey } from "../api/idempotency";
 import { reticleSignal } from "../lib/reticleSignal";
 import { useAuth } from "../auth/AuthContext";
-import { Alert } from "../components/Alert";
+import { toast } from "sonner";
 import {
   EMPTY_ITEM_FORM_VALUES,
   ItemFormFields,
@@ -34,7 +34,6 @@ export function ItemCreatePage() {
     teamId: creatableTeams[0]?.teamId ?? "",
   }));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState<string | null>(null);
 
   function handleChange<K extends keyof ItemFormValues>(field: K, value: ItemFormValues[K]) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -57,7 +56,9 @@ export function ItemCreatePage() {
     onError: (error) => {
       const backendErrors = fieldErrorsFrom(error);
       setFieldErrors(backendErrors);
-      setFormError(Object.keys(backendErrors).length > 0 ? null : errorMessage(error));
+      if (Object.keys(backendErrors).length === 0) {
+        toast.error(errorMessage(error));
+      }
     },
   });
 
@@ -66,10 +67,8 @@ export function ItemCreatePage() {
     const errors = { ...validateItemForm(values), ...validateTeamSelected(values) };
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setFormError(null);
       return;
     }
-    setFormError(null);
     mutation.mutate(toCreateItemInput(values));
   }
 
@@ -97,12 +96,6 @@ export function ItemCreatePage() {
 
       <h1 className="page__title">New work item</h1>
       <p className="page__subtitle">Status starts at Open and is advanced separately.</p>
-
-      {formError && (
-        <Alert tone="error" title="Couldn't create the work item">
-          {formError}
-        </Alert>
-      )}
 
       <form className="form card" onSubmit={handleSubmit} noValidate aria-busy={submitting}>
         <ItemFormFields
