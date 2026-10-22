@@ -11,6 +11,7 @@ import { env } from "../config/env.js";
  * - Non-primitive values are replaced with "[omitted]" to prevent payload leakage.
  */
 
+// Retained for the log-level lookup in `resolveLogLevel` below.
 const LOG_LEVELS = ["error", "warn", "info", "http", "debug"] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -31,16 +32,6 @@ function sanitizeValue(value: unknown): string | number | boolean | null | "[omi
     return value;
   }
   return "[omitted]";
-}
-
-/** Sanitize a log metadata object, keeping only primitive values. */
-function sanitizeMeta(meta: Record<string, unknown>): Record<string, string | number | boolean | null> {
-  const safe: Record<string, string | number | boolean | null> = {};
-  for (const [key, value] of Object.entries(meta)) {
-    if (value === undefined) continue;
-    safe[key] = sanitizeValue(value);
-  }
-  return safe;
 }
 
 /** Format for development: human-readable, colorized with structured tags. */
@@ -159,17 +150,5 @@ const logger = winston.createLogger({
   exitOnError: false,
 });
 
-/**
- * Create a child logger with additional context fields.
- * Useful for adding request IDs, component names, etc.
- */
-export function createChildLogger(context: Record<string, unknown>): winston.Logger {
-  return logger.child(sanitizeMeta(context));
-}
-
 /** Re-export the main logger for direct use. */
 export { logger };
-
-/** Log levels for external reference. */
-export { LOG_LEVELS };
-export type { LogLevel };

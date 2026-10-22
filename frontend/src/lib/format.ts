@@ -59,8 +59,7 @@ export function dateTimeLocalToIso(value: string): string | null {
   return date.toISOString();
 }
 
-/** True when a string is a well-formed UUID (used for assignee id inputs). */
-export function isUuid(value: string): boolean {
+/** True when a string is a well-formed UUID (used for assignee id inputs). */export function isUuid(value: string): boolean {
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
     value,
   );

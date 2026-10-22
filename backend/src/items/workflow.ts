@@ -28,7 +28,7 @@ export const CLAIMABLE_STATUSES: readonly WorkStatus[] = ["OPEN", "IN_PROGRESS"]
 
 /** The one transition that requires approval authority rather than ordinary edit rights. */
 export const APPROVAL_FROM: WorkStatus = "AWAITING_APPROVAL";
-export const APPROVAL_TO: WorkStatus = "RESOLVED";
+const APPROVAL_TO: WorkStatus = "RESOLVED";
 
 export function isApprovalStep(from: WorkStatus, to: WorkStatus): boolean {
   return from === APPROVAL_FROM && to === APPROVAL_TO;

@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listItems } from "../api/items";
 import type { ItemFilters, SortDirection, SortField, WorkPriority, WorkStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { StatusBadge, PriorityBadge, TypeBadge } from "../components/ui/Badge";
+import { StatusBadge, PriorityBadge, TypeBadge } from "../components/Badges";
 import { ErrorState, LoadingState } from "../components/StateViews";
 import { ActionCard, MetricCard, Table } from "../components/ui";
 import { DEFAULT_PAGE_SIZE, SORT_FIELDS, SORT_DIRECTIONS } from "../lib/constants";

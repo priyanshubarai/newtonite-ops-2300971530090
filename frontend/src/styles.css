@@ -1354,25 +1354,6 @@ a:hover {
   margin-left: var(--space-1);
 }
 
-.button__spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .button__spinner {
-    animation-duration: 2.4s;
-  }
-}
-
 /* ==========================================================================
    Components - Inputs
    ========================================================================== */
@@ -3079,17 +3060,6 @@ select:not(:disabled) {
   gap: var(--space-3);
   flex-wrap: wrap;
   padding-top: var(--space-2);
-}
-
-.card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-  margin-top: auto;
 }
 
 /* ==========================================================================

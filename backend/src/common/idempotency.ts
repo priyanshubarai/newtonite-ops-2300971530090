@@ -36,15 +36,15 @@ import { logTransactionOutcome, logTransactionStarted, logIdempotencyEvent, type
  * cached as a success.
  */
 
-export const IDEMPOTENCY_HEADER = "idempotency-key";
+const IDEMPOTENCY_HEADER = "idempotency-key";
 
 /** Upper bound on the key length; keys are opaque client strings. */
-export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 
 /** Retention hint stored on the record. No automated purge runs in this phase. */
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 
-export interface MutationResult {
+interface MutationResult {
   status: number;
   body: unknown;
 }
@@ -54,7 +54,7 @@ export interface MutationResult {
  * dropped, and `Date`s normalized to ISO strings, so two semantically equal
  * payloads fingerprint identically regardless of key order.
  */
-export function stableStringify(value: unknown): string {
+function stableStringify(value: unknown): string {
   if (value instanceof Date) return JSON.stringify(value.toISOString());
   if (value === undefined) return "null";
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
@@ -67,7 +67,7 @@ export function stableStringify(value: unknown): string {
 }
 
 /** Stable request fingerprint over the operation, its params, and its payload. */
-export function requestFingerprint(
+function requestFingerprint(
   operation: string,
   params: unknown,
   payload: unknown,

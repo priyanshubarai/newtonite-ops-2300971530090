@@ -105,12 +105,6 @@ export async function createTestWorkItem(opts: {
   return row.id;
 }
 
-/** Delete work items belonging to any of the given teams (FK-safe cleanup). */
-export async function deleteWorkItemsForTeams(teamIds: string[]): Promise<void> {
-  if (teamIds.length === 0) return;
-  await db.delete(workItems).where(inArray(workItems.teamId, teamIds));
-}
-
 /** Read one work-item row (used to assert version/status/assignee after a call). */
 export async function getWorkItemRow(id: string) {
   const rows = await db.select().from(workItems).where(eq(workItems.id, id)).limit(1);

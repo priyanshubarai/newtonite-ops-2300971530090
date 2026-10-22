@@ -1,4 +1,4 @@
-import { ApiError, ERROR_CODES, isApiError } from "../api/client";
+import { ApiError, isApiError } from "../api/client";
 
 /**
  * Helpers for turning an unknown thrown value into UI-friendly information.
@@ -15,10 +15,6 @@ export function codeOf(error: unknown): string | null {
 
 export function isStaleVersion(error: unknown): boolean {
   return error instanceof ApiError && error.isStaleVersion;
-}
-
-export function isIdempotencyKeyReused(error: unknown): boolean {
-  return codeOf(error) === ERROR_CODES.IDEMPOTENCY_KEY_REUSED;
 }
 
 export function isForbidden(error: unknown): boolean {

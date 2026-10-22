@@ -10,7 +10,7 @@ import type {
   WorkStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { StatusBadge, PriorityBadge, TypeBadge } from "../components/ui/Badge";
+import { StatusBadge, PriorityBadge, TypeBadge } from "../components/Badges";
 import { ErrorState } from "../components/StateViews";
 import { FormField } from "../components/FormField";
 import { Table, TablePagination } from "../components/ui/Table";

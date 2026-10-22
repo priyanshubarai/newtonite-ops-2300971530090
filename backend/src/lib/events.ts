@@ -1,77 +1,15 @@
 /**
- * Centralized event names and structured logging helpers for application observability.
+ * Structured logging helpers for application observability.
  *
- * Event names are stable, machine-readable identifiers. They use a hierarchical
- * naming convention: `domain.action.outcome` (e.g., `item.create.committed`).
- * This allows filtering and alerting on event prefixes.
+ * Each log event carries a stable, machine-readable `event` name following the
+ * hierarchical `domain.action.outcome` convention (e.g., `item.create.committed`)
+ * so events can be filtered and alerted on by prefix.
  */
 
 import { Logger } from "winston";
 
-// Service identifiers
-export const SERVICE_API = "api";
-export const SERVICE_OUTBOX_WORKER = "outbox-worker";
-
-// Event name constants
-export const EVENTS = {
-  // Request processing stages
-  REQUEST_RECEIVED: "request.received",
-  REQUEST_AUTHENTICATED: "request.authenticated",
-  REQUEST_AUTHORIZED: "request.authorized",
-  REQUEST_VALIDATED: "request.validated",
-  MUTATION_STARTED: "mutation.started",
-  TRANSACTION_STARTED: "transaction.started",
-  TRANSACTION_COMMITTED: "transaction.committed",
-  TRANSACTION_ROLLED_BACK: "transaction.rolled_back",
-  TRANSACTION_OUTCOME_UNKNOWN: "transaction.outcome_unknown",
-  BUSINESS_OPERATION_COMPLETED: "business.operation_completed",
-  HTTP_RESPONSE_SENT: "http.response_sent",
-
-  // Item lifecycle events
-  ITEM_CREATE_COMMITTED: "item.create.committed",
-  ITEM_UPDATE_COMMITTED: "item.update.committed",
-  ITEM_UPDATE_NOOP: "item.update.noop",
-  ITEM_CLAIM_COMMITTED: "item.claim.committed",
-  ITEM_CLAIM_LOST_RACE: "item.claim.lost_race",
-  ITEM_CLAIM_NOT_CLAIMABLE: "item.claim.not_claimable",
-  ITEM_TRANSITION_COMMITTED: "item.transition.committed",
-  ITEM_TRANSITION_STALE_VERSION: "item.transition.stale_version",
-  ITEM_TRANSITION_INVALID: "item.transition.invalid",
-  ITEM_TRANSITION_UNAUTHORIZED: "item.transition.unauthorized",
-  COMMENT_CREATE_COMMITTED: "comment.create.committed",
-
-  // Idempotency events
-  IDEMPOTENCY_REPLAY: "idempotency.replay",
-  IDEMPOTENCY_KEY_REUSED: "idempotency.key_reused",
-
-  // Activity/outbox events within transaction
-  ACTIVITY_INSERTED_IN_TRANSACTION: "activity.inserted_in_transaction",
-  OUTBOX_INSERTED_IN_TRANSACTION: "outbox.inserted_in_transaction",
-  IDEMPOTENCY_RECORD_WRITEN: "idempotency.record_written",
-
-  // Outbox lifecycle events
-  OUTBOX_JOB_ENQUEUED: "outbox.job.enqueued",
-  OUTBOX_JOB_CLAIMED: "outbox.job.claimed",
-  OUTBOX_JOB_PROCESSING: "outbox.job.processing",
-  OUTBOX_JOB_ACKNOWLEDGED: "outbox.job.acknowledged",
-  OUTBOX_JOB_RETRY_SCHEDULED: "outbox.job.retry_scheduled",
-  OUTBOX_JOB_FAILED: "outbox.job.failed",
-  OUTBOX_JOB_STATE_LOST: "outbox.job.state_lost",
-  OUTBOX_JOB_LEASE_RECOVERED: "outbox.job.lease_recovered",
-  OUTBOX_JOB_LEASE_EXHAUSTED: "outbox.job.lease_exhausted",
-
-  // Worker lifecycle
-  WORKER_STARTED: "worker.started",
-  WORKER_BATCH: "worker.batch",
-  WORKER_ITERATION_FAILED: "worker.iteration_failed",
-  WORKER_SHUTDOWN_REQUESTED: "worker.shutdown_requested",
-  WORKER_SHUTDOWN_COMPLETE: "worker.shutdown_complete",
-  WORKER_SHUTDOWN_FAILED: "worker.shutdown_failed",
-  WORKER_UNHANDLED_REJECTION: "worker.unhandled_rejection",
-} as const;
-
-// Transaction outcome types
-export type TransactionOutcome = "committed" | "rolled_back" | "unknown";
+// Used only by `TransactionLogContext` below.
+type TransactionOutcome = "committed" | "rolled_back" | "unknown";
 
 // Structured log context for transaction outcomes
 export interface TransactionLogContext {
@@ -130,24 +68,6 @@ export interface ConflictLogContext {
   teamId?: string;
   conflictType: "lost_race" | "not_claimable" | "stale_version" | "invalid_transition" | "unauthorized" | "idempotency_key_reused";
   message: string;
-}
-
-/**
- * Create a structured log event with common fields.
- */
-export function createLogEvent(
-  level: "error" | "warn" | "info" | "http" | "debug",
-  service: string,
-  event: string,
-  context: Record<string, unknown> = {}
-): Record<string, unknown> {
-  return {
-    timestamp: new Date().toISOString(),
-    level,
-    service,
-    event,
-    ...context,
-  };
 }
 
 /**

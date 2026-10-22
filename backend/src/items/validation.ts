@@ -106,7 +106,7 @@ export type CreateItemInput = z.infer<typeof createItemSchema>;
  * `expectedVersion` is the version the client last read. It is a precondition
  * only - the server never accepts it as the new stored version.
  */
-export const expectedVersionField = z
+const expectedVersionField = z
   .number({ invalid_type_error: "expectedVersion must be a number" })
   .int("expectedVersion must be an integer")
   .min(1, "expectedVersion must be at least 1");
