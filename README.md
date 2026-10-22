@@ -170,21 +170,44 @@ npm run test:run     # vitest (unit + real-PostgreSQL integration suites; see Te
 
 ### How authentication works
 
-Login issues a **short-lived, signed bearer token** (JWT, HS256) that the client sends on every protected request.
+Login sets a **signed session token** (JWT, HS256) in an **HttpOnly cookie**. The browser stores the credential; JavaScript never sees it, and every subsequent request re-sends it automatically.
 
-- `POST /auth/login` accepts `{ email, password }`, verifies the password against the stored **bcrypt** hash, and returns `{ token, tokenType: "Bearer", user }`.
+- `POST /auth/login` accepts `{ email, password }`, verifies the password against the stored **bcrypt** hash, and returns `{ tokenType: "Bearer", user }` — **no token value is present in the response body**.
+- The token is delivered only as a cookie: `Set-Cookie: auth_token=<jwt>; Max-Age=<JWT_EXPIRES_IN>; Path=/; HttpOnly; SameSite=Strict` (plus `Secure` when `NODE_ENV=production`).
+- The client sends it with `credentials: "include"` on every request to the API. It does **not** attach an `Authorization` header, and it does **not** store the token in `localStorage`/`sessionStorage` — the only thing it persists is a boolean session flag (`newtonite_has_session`) used to decide whether to render the authenticated shell.
 - Tokens are signed with `JWT_SECRET` and expire after `JWT_EXPIRES_IN` seconds (default 900 = 15 minutes).
 - The token carries only the user id in its `sub` claim. **Roles and memberships are never embedded in the token** — they are loaded from PostgreSQL on every request, so a role change or membership revocation takes effect immediately without waiting for the token to expire.
-- Send the token as: `Authorization: Bearer <token>`.
+- `POST /auth/logout` clears the cookie. The frontend calls it on sign-out, so the credential is removed from the browser rather than only hidden.
+- The backend also accepts the token in an `Authorization: Bearer <token>` header for non-browser clients; the cookie is checked first.
 
 Every login failure — unknown email, wrong password, or a deactivated account — returns the same generic `401 { "error": "Invalid email or password" }`, so account existence is never disclosed. Malformed input returns `400`.
+
+### CSRF posture
+
+The session cookie is `SameSite=Strict`, so the browser does not attach it to cross-site requests; combined with the same-origin `/api` prefix (no CORS preflight is involved for same-origin calls) this is the primary CSRF defence. There is no separate CSRF token. `SameSite=Strict` also means a cookie is not sent on a top-level navigation arriving from another site, so a cold cross-site link into the app shows the login screen rather than silently reusing the session.
+
+### Security headers and rate limiting
+
+`backend/src/app.ts` mounts `helmet@8.3.0` with an explicit Content-Security-Policy (`script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`), HSTS (1 year, `includeSubDomains`, `preload`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and no `X-Powered-By`.
+
+Two rate limiters guard the API, both keyed on the client address and both configurable by environment variable:
+
+| Limiter | Default | Response |
+|---|---|---|
+| `POST /auth/login` | 5 attempts / 60 s, then a 15-minute block | `429` with `Retry-After` |
+| All API routes | 100 requests / 60 s | `429` with `Retry-After` |
+
+In production, `GET /health` is restricted to internal client addresses (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) and answers `403` to anything else.
+
+The full security review — every finding, its severity, the evidence behind it, and the residual risks that are still open — is in [`SECURITY_AUDIT.md`](./SECURITY_AUDIT.md).
 
 ### Endpoints added
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `POST /auth/login` | None | Exchange email + password for a bearer token. |
+| `POST /auth/login` | None | Exchange email + password for a session cookie. |
 | `GET /auth/me` | Required | Return the authenticated user's safe fields plus their team memberships and roles. |
+| `POST /auth/logout` | None | Clear the session cookie. Succeeds whether or not a session is present. |
 
 ### Required environment variables
 
@@ -194,8 +217,13 @@ Set in `backend/.env` (gitignored). See `backend/.env.example` for blank placeho
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon PostgreSQL connection string. |
 | `JWT_SECRET` | Yes | Signing secret for auth tokens (min 32 chars). Never commit a real value. |
-| `JWT_EXPIRES_IN` | No | Token lifetime in seconds (default `900`). |
+| `JWT_EXPIRES_IN` | No | Token lifetime in seconds (default `900`); also the cookie `Max-Age`. |
 | `DEMO_PASSWORD` | No | Password for all seeded demo users; defaults to `newtonite-demo`. Development only. |
+| `LOGIN_RATE_LIMIT_POINTS` | No | Login attempts allowed per window (default `5`). |
+| `LOGIN_RATE_LIMIT_DURATION` | No | Login rate-limit window in seconds (default `60`). |
+| `LOGIN_RATE_LIMIT_BLOCK_DURATION` | No | Login block duration in seconds after the limit is hit (default `900`). |
+| `API_RATE_LIMIT_POINTS` | No | General API requests allowed per window (default `100`). |
+| `API_RATE_LIMIT_DURATION` | No | General API rate-limit window in seconds (default `60`). |
 | `OUTBOX_BATCH_SIZE` | No | Outbox worker batch size (default `10`). |
 | `OUTBOX_POLL_INTERVAL_MS` | No | Outbox worker poll interval (ms, default `2000`). |
 | `OUTBOX_BACKOFF_BASE_MS` | No | Outbox retry backoff base (ms, default `5000`). |
@@ -244,8 +272,8 @@ Authorization is enforced entirely server-side (`src/auth/policy.ts` + `src/auth
 ### Current auth limitations
 
 - No refresh tokens, OAuth/SSO, password reset, or account registration (out of scope for this phase).
-- No frontend login screen yet (backend only).
-- Tokens are stateless; a compromised `JWT_SECRET` requires rotating the secret. Keep it strong and private.
+- Tokens are stateless: there is no server-side revocation list, so a token that leaks stays valid until it expires. Signing out clears the browser's copy, which is the standard mitigation for a cookie session.
+- Throttling is per client address, not per account. See **M-01** and **M-03** in [`SECURITY_AUDIT.md`](./SECURITY_AUDIT.md).
 
 ### Running the Application
 
@@ -442,7 +470,7 @@ Conflict responses include a machine-readable `code` alongside the human-readabl
 - **No idempotency purge job.** `expires_at` is a retention hint; cleanup is future work.
 - **Claimability** is defined as `OPEN` or `IN_PROGRESS` over the existing status model (no new statuses); `AWAITING_APPROVAL`/`RESOLVED`/`CLOSED` are not claimable.
 - **`ITEM_UPDATED` enum value** was added by additive migration `0001_yummy_the_captain.sql` (`ALTER TYPE ... ADD VALUE`) so a title/description/type/dueAt change has an accurate event type. No historical audit rows were rewritten.
-- **Comments and activity-history read endpoints** remain out of scope (the `comments`/`activity_events` tables exist; only writes are implemented).
+- **Comments and activity-history read endpoints** (`GET /items/:id/comments`, `GET /items/:id/activity`) are implemented alongside the write endpoints, and the detail view renders both.
 - The existing `work_items` indexes (`wi_team_status_updated_idx`, `wi_team_priority_status_updated_idx`, `wi_assignee_status_updated_idx`, plus the single-column indexes) already cover the team-scoped filter/sort access patterns; **no new index was required**.
 
 ## Phase 6 Verification (Integration, Security, Regression)
@@ -453,7 +481,7 @@ Phase 6 audited Phases 1–5 against the running application and the live Neon d
   1. A **malformed JSON body returned `500`** instead of `400`. The central error handler only recognised `ApiError`, so body-parser failures fell through to the generic server-error branch. Fixed in `src/app.ts` by mapping a middleware error that carries its own 4xx status (malformed JSON → `400`, oversized body → `413`) to that status with a generic, non-leaky message.
   2. An **out-of-range `page` returned `500`**. `page` had no upper bound, so a huge value produced an `OFFSET` such as `2e+21` that PostgreSQL rejects (`22P02 invalid input syntax for type bigint`). Fixed in `src/items/validation.ts` by capping `page` at `Number.MAX_SAFE_INTEGER` (which keeps `page × pageSize` within a bigint), rejecting absurd values with `400` rather than failing at the database.
 - **Verification (all executed against real PostgreSQL, all passing):** authentication boundaries (missing/malformed/expired/forged tokens → `401`); login non-disclosure; response hygiene (no SQL, stack traces, or secrets in error bodies); live membership revocation and role promotion/demotion honoured on the next request; cross-team isolation across every mutation endpoint (`404`); the pagination contract incl. the preserved `pageSize > 100 → 400` rule; `PATCH`/create input validation; idempotency guards (over-long key rejected, validation failures not cached and key not consumed); and the live migration state (the `ITEM_UPDATED` enum value is applied and the two migrations are recorded).
-- **Known limitation confirmed, not fixed here:** there is **no comments endpoint**, so the checklist's "cannot comment on another team's item" case has no matching route to exercise; item-level cross-team isolation is instead verified against every existing mutation endpoint. See the Phase 6 report.
+- **Known limitation confirmed at the time, since closed:** there was **no comments endpoint**, so the checklist's "cannot comment on another team's item" case had no matching route to exercise; item-level cross-team isolation was instead verified against every existing mutation endpoint. Comment endpoints have since been added, and cross-team isolation on them is covered by the current suite.
 
 ## Transactional Outbox Worker (implemented — Phase 8)
 
@@ -557,36 +585,51 @@ The frontend is a React 19 + TypeScript single-page app that consumes only the e
 **Stack and structure**
 
 - `react-router-dom` v7 for routing, `@tanstack/react-query` v5 for server state, plain CSS (`src/styles.css`) with design tokens. No UI component framework was introduced.
-- Layers: `src/api/` (typed client + per-resource modules + DTOs), `src/auth/` (in-memory token store, session provider, route guard), `src/lib/` (constants, formatting, permissions, shared form logic), `src/components/` (presentational), `src/pages/` (routes), `src/test/` (harness, fixtures).
+- Layers: `src/api/` (typed client + per-resource modules + DTOs), `src/auth/` (session-flag store, session provider, route guard), `src/lib/` (constants, formatting, permissions, shared form logic), `src/components/` (presentational), `src/pages/` (routes), `src/test/` (harness, fixtures).
 
 **API access**
 
-- Every request goes through one typed client, `src/api/client.ts`: it attaches the bearer token, builds the query string (dropping empty values), sends `Idempotency-Key`, parses the backend's `{ error, code, details }` error shape into an `ApiError`, and never logs tokens or credentials.
+- Every request goes through one typed client, `src/api/client.ts`: it sends the session cookie (`credentials: "include"`), builds the query string (dropping empty values), sends `Idempotency-Key`, parses the backend's `{ error, code, details }` error shape into an `ApiError`, and never logs tokens or credentials. It attaches **no** `Authorization` header — the credential is the `HttpOnly` cookie, which JavaScript cannot read.
 - Base URL comes from `VITE_API_URL`, defaulting to the same-origin `/api` prefix. In development, `vite.config.ts` proxies `/api/*` to `http://localhost:3000` and strips the prefix, so the browser never makes a cross-origin request and **no backend CORS change was needed**.
 
 **Session handling**
 
-- `POST /auth/login` returns the token; the token is held **in memory only** (`src/auth/tokenStore.ts`) — no `localStorage`/`sessionStorage`. Identity and memberships come from `GET /auth/me` (the router mounts it under `/auth`).
+- `POST /auth/login` sets the `HttpOnly` session cookie and returns no token. The client keeps only a boolean session flag in `localStorage` (`newtonite_has_session`); the credential itself is never readable by script. Identity and memberships come from `GET /auth/me` (the router mounts it under `/auth`).
+- Because the credential is a cookie, **a page refresh keeps the user signed in**: the browser re-sends the cookie, `GET /auth/me` succeeds, and the shell renders again.
 - Login failures are deliberately generic ("Invalid email or password.") and identical for unknown email, wrong password, and disabled account, so account existence is never revealed.
-- A `401` on an authenticated request clears the token and the query cache and returns the user to `/login`; a failed login (`auth: false`, no token sent) never triggers that path. Logout clears client-held state only — the backend issues stateless tokens and exposes no revocation endpoint, so no fake revocation is performed.
+- A `401` on an authenticated request clears the session flag and the query cache and returns the user to `/login`; a failed login (`auth: false`) never triggers that path.
+- Sign-out calls `POST /auth/logout` so the server clears the cookie, then clears the session flag and the query cache locally. The local state is cleared even if the request fails, so a network error can never leave the user in a signed-in state they asked to leave.
 
 **Routes**
 
 | Route | Screen |
 |---|---|
 | `/login` | Login form |
-| `/` | redirect → `/items` |
+| `/` | redirect → `/overview` |
+| `/overview` | Dashboard: metric cards and recent work |
 | `/items` | Work-item list (server-side filters + pagination) |
+| `/assigned` | **Assigned to Me** view (server preset `assigned`) |
+| `/attention` | **Unassigned Urgent** view (server preset `unassigned_urgent`) |
+| `/approval` | **Awaiting My Approval** view (server preset `awaiting_approval`) |
+| `/teams/:teamId` | One team's work, with the same three presets available |
 | `/items/new` | Create form |
-| `/items/:id` | Detail with claim and workflow-transition actions |
+| `/items/:id` | Detail with claim, workflow-transition, comments and activity timeline |
 | `/items/:id/edit` | Edit form |
 | `*` | Not-found |
 
 Everything except `/login` sits behind the route guard and the authenticated shell (skip link, header, primary nav, identity, sign-out).
 
+**Dashboard views**
+
+The three named views are real server-side presets, not client-side filters. `GET /items` accepts a `preset` parameter — `assigned`, `unassigned_urgent`, `awaiting_approval` — and the backend applies the corresponding filter:
+
+- `assigned` — items whose `assignee_id` is the calling user (the service layer substitutes the authenticated user id; a client-supplied `assigneeId` cannot widen it).
+- `unassigned_urgent` — `assignee_id IS NULL AND priority IN ('HIGH','CRITICAL')`.
+- `awaiting_approval` — `status = 'AWAITING_APPROVAL'`, **and only for a caller who holds `LEAD` or `ADMIN` in at least one team**. A caller without that role receives an empty page, so the restriction is enforced by the server, not by hiding a button.
+
 **Server state, filtering, and pagination**
 
-- Query keys: `["me"]`, `["items", filters]`, `["item", id]`. Create invalidates `["items"]`; update/claim/transition write the returned item into `["item", id]` and invalidate `["items"]`.
+- Query keys: `["me"]`, `["items", filters]`, `["item", id]`, `["activity", id]`, `["comments", id]`. Create invalidates `["items"]`; update/claim/transition write the returned item into `["item", id]` and invalidate `["items"]`; posting a comment invalidates `["comments", id]` and `["activity", id]` so the timeline stays in step with the discussion.
 - The list is server-filtered and server-paginated — the browser never downloads the collection. `teamId`, `status`, `priority`, `assigneeId`, `search`, `sort`, and `order` map 1:1 onto the documented `GET /items` contract. Page size is offered as 10/20/50/100, so a value above the API maximum of 100 can never be submitted.
 - Changing any filter resets to page 1; free-text filters are debounced (300 ms) and folded into the query atomically so a burst of keystrokes produces one request; an `AbortSignal` cancels superseded requests; `keepPreviousData` avoids a blank table while paging. A partially typed assignee id is shown as a validation hint and is **never sent** as an invalid query parameter.
 
@@ -611,20 +654,18 @@ Semantic landmarks and one `h1` per screen, a skip link, labelled controls, `ari
 
 **Tests**
 
-`frontend npm test` runs 65 tests in 8 files (jsdom). They drive the real route table, the real API client, and the real session provider against a stubbed network boundary, covering: auth header/query/error mapping and the 401-vs-failed-login distinction; login validation, generic failure messaging, session handoff, and keyboard submission; redirect when unauthenticated, loading, rejected-token and failing-session states, and sign-out; list rendering, empty/error/retry, paging, filter-driven page reset, page-size bounds, and role-gated create; create validation, payload shape, backend field errors, double-submit prevention, and idempotency-key reuse/regeneration; edit prefill, `expectedVersion` submission, the stale-version conflict with edit preservation, and permission gating; detail rendering, claim success and lost-race recovery, transition submission with the current version, approval gating by role, invalid/stale/forbidden transition handling, and closed-item terminal state. There is also a unit suite for the shared form validation/payload mapping. **These are client-behaviour tests; they do not prove backend security.**
+`frontend npm test` runs **137 tests in 12 files** (jsdom). They drive the real route table, the real API client, and the real session provider against a stubbed network boundary, covering: auth header/query/error mapping and the 401-vs-failed-login distinction (including the negative case — a sessionless `401` must *not* trigger the sign-out path); login validation, generic failure messaging, session handoff, and keyboard submission; redirect when unauthenticated, loading, rejected-token and failing-session states, and sign-out — including that sign-out **calls the server** and that a failing logout request still signs the user out locally; list rendering, empty/error/retry, paging, filter-driven page reset, page-size bounds, and role-gated create; create validation, payload shape, backend field errors, double-submit prevention, and idempotency-key reuse/regeneration; edit prefill, `expectedVersion` submission, the stale-version conflict with edit preservation, and permission gating; detail rendering, claim success and lost-race recovery, transition submission with the current version, approval gating by role, invalid/stale/forbidden transition handling, comments and the activity timeline, and closed-item terminal state; the three dashboard views and the shell's per-team preset links. There is also a unit suite for the shared form validation/payload mapping. **These are client-behaviour tests; they do not prove backend security.**
 
 ### Phase 7 scope notes and known limitations
 
-- **No activity timeline or comments UI.** The specification lists both, but the backend exposes no activity-read or comment-read endpoint (only writes), and adding endpoints is out of scope for this phase. The detail view says so in plain language rather than faking the feature.
-- **The three named dashboard views were not built as separate presets.** "Assigned to Me" and "Awaiting My Approval" are expressible with existing filters, but **"Unassigned Urgent" is not**: `GET /items` has no "assignee is null" filter, and "teams where I am a Lead" is not a query the API accepts. Implementing them faithfully would require new backend query parameters, which this phase is not authorised to add. See *Requires Architect Review* in `docs/ARCHITECTURE.md` §15.
 - **No user/team-member directory endpoint**, so the assignee is entered as a user UUID, with an "Assign to me" shortcut for the common case. Filtering by assignee likewise takes a UUID.
-- **A page refresh signs the user out**, because the token is deliberately not persisted to browser storage.
 - **Pagination is offset-based, not cursor-based**, matching what the API actually implements (`page`/`pageSize` with an exact total).
+- The three dashboard views and the comments/activity surfaces that were outstanding in earlier phases are now implemented against the server-side `preset` parameter and the `GET /items/:id/comments` / `GET /items/:id/activity` endpoints.
 
 ```
 # Run the frontend suite and checks
 cd frontend
-npm test            # 65 tests, 8 files
+npm test            # 137 tests, 12 files
 npm run typecheck   # tsc --noEmit
 npm run build       # tsc && vite build
 npm run lint        # stub: "lint: not configured"
@@ -641,18 +682,24 @@ The following behaviors are covered by real PostgreSQL integration tests in `src
 5. **Resource authorization** — cross-team access is denied (`404`); a role held in another team grants nothing.
 6. **Audit atomicity** — a failing activity/outbox insert rolls back the item mutation in the same transaction.
 
-## Known Limitations (To Be Documented)
+## Known Limitations
 
-Known limitations will be documented during Phase 9 (Submission Hardening). Current known constraints from specification:
+Scope constraints carried from the specification, followed by the limitations of what is actually built.
+
+**Out of scope by specification**
 - User registration is out of scope (seeded demo users only)
 - Reopening Closed items is out of scope
-- No Redis, dedicated search engine, read replicas, or partitioning in initial build
-- WebSockets, SSO, email delivery, file attachments are not part of initial implementation
-- Transactional outbox **insertion** (Phase 5) and a **worker** (Phase 8) are implemented: jobs are written in the same transaction as the mutation, and a separate process claims, validates, and acknowledges them with bounded retries. There is still **no external delivery** (no email/webhook/integration), and **no failed-job alerting** — a `FAILED` job is visible only by querying the table or grepping the worker log (see *[Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8)*).
+- No Redis, dedicated search engine, read replicas, or partitioning in the initial build
+- WebSockets, SSO, email delivery, and file attachments are not part of the initial implementation
+
+**Limitations of the implementation**
+- **The outbox worker delivers nothing externally.** Transactional outbox *insertion* (Phase 5) and a *worker* (Phase 8) are implemented: jobs are written in the same transaction as the mutation, and a separate process claims, validates, and acknowledges them with bounded retries. There is still **no external delivery** (no email/webhook/integration), and **no failed-job alerting** — a `FAILED` job is visible only by querying the table or grepping the worker log (see *[Transactional Outbox Worker](#transactional-outbox-worker-implemented--phase-8)*).
 - Idempotency records have no automated purge yet (`expires_at` is a retention hint).
-- No activity-history or comments **read** endpoint exists, so the frontend has no activity timeline or comments section (confirmed in Phase 6, restated in Phase 7).
-- The frontend keeps the auth token in memory only, so a page refresh signs the user out (see *Frontend (implemented — Phase 7)*).
 - There is no user/team-member directory endpoint, so assigning work requires a user UUID.
+- **Pagination is offset-based, not cursor-based**, matching what the API implements (`page`/`pageSize` with an exact `total`).
+- **The session credential lives in an `HttpOnly` cookie, so a page refresh keeps the user signed in.** Tokens are stateless and there is no server-side revocation list, so a leaked token remains valid until it expires; signing out clears the browser's copy (see *Authentication & Authorization* and `SECURITY_AUDIT.md`).
+- **Login throttling is per client address, not per account**, and the rate-limit counters live in the backend process's memory. Behind a reverse proxy every client would share one bucket, because `trust proxy` is not configured. See `SECURITY_AUDIT.md` M-01, M-02 and M-03.
+- **`drizzle-orm` is behind a published security advisory** (GHSA-gpj5-g38j-94v9). The vulnerable code path is not reachable in this codebase, and the fix requires a breaking major-version upgrade; the reasoning and the follow-up are recorded in `SECURITY_AUDIT.md` M-05.
 
 ## Submission Information
 
@@ -664,7 +711,7 @@ Known limitations will be documented during Phase 9 (Submission Hardening). Curr
 
 - **Migrations:** the local Drizzle journal (`src/db/migrations/meta/_journal.json`, 2 entries) matches the live database: `drizzle.__drizzle_migrations` holds exactly 2 applied migrations whose recorded timestamps equal the journal's `when` values, and the additive `ITEM_UPDATED` enum value is present in `activity_event_type` with all prior values preserved. Local and remote migration state agree — no discrepancy and no history rewrite.
 - **Seed:** `npm run seed` is idempotent (deterministic UUIDs + `onConflictDoUpdate`, no deletes). Two consecutive runs produced identical totals (`users: 10`, `work_items: 2500`, plus `teams: 4`, `memberships: 14`, `comments: 200`, `activity_events: 600`) with no duplicate rows.
-- **Checks:** backend typecheck, frontend typecheck, and the backend production build all completed with exit code `0`; the full backend suite (unit + integration) passed. Lint is not configured (`npm run lint` is an explicit stub in both packages). Phase 7 added a frontend test suite (65 tests in 8 files, jsdom) which additionally required the `jsdom`, `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, and `@testing-library/jest-dom` dev dependencies — `jsdom` was already declared in `vitest.config.ts` but the package was missing.
+- **Checks (re-run 2026-10-22):** backend typecheck, frontend typecheck, backend production build, and frontend production build all completed with exit code `0`; the full backend suite (**209 tests, 9 files**) and the full frontend suite (**137 tests, 12 files**) passed. Lint is not configured (`npm run lint` is an explicit stub in both packages). The frontend test suite requires the `jsdom`, `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, and `@testing-library/jest-dom` dev dependencies.
 
 ## License
 

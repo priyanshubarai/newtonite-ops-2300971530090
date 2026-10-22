@@ -10,5 +10,12 @@ export default defineConfig({
     // the genuine-concurrency tests; keep explicit headroom.
     testTimeout: 30000,
     hookTimeout: 60000,
+    env: {
+      LOGIN_RATE_LIMIT_POINTS: '1000',
+      LOGIN_RATE_LIMIT_DURATION: '60',
+      LOGIN_RATE_LIMIT_BLOCK_DURATION: '0',
+      API_RATE_LIMIT_POINTS: '10000',
+      API_RATE_LIMIT_DURATION: '60',
+    },
   },
 });

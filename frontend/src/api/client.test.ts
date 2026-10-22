@@ -1,32 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, request, setUnauthorizedHandler } from "./client";
-import { setToken } from "../auth/tokenStore";
 import { installFetchMock } from "../test/mockFetch";
+import { setSession } from "../auth/tokenStore";
 
 afterEach(() => {
   setUnauthorizedHandler(null);
 });
 
 describe("api client", () => {
-  it("attaches the bearer token and Accept header for authenticated requests", async () => {
+  it("does not attach Authorization header for authenticated requests (uses cookies)", async () => {
     const mock = installFetchMock();
     mock.on("GET", "/items", () => ({ status: 200, body: { ok: true } }));
 
-    setToken("tok-123");
     await request("/items");
 
     const call = mock.requestsFor("GET", "/items")[0];
-    expect(call.headers.Authorization).toBe("Bearer tok-123");
+    expect(call.headers.Authorization).toBeUndefined();
     expect(call.headers.Accept).toBe("application/json");
     // Requests go through the configured same-origin API prefix.
     expect(call.url.pathname).toBe("/api/items");
   });
 
-  it("does not attach a token when auth is disabled", async () => {
+  it("does not attach credentials when auth is disabled", async () => {
     const mock = installFetchMock();
     mock.on("POST", "/auth/login", () => ({ status: 200, body: {} }));
 
-    setToken("tok-123");
     await request("/auth/login", { method: "POST", body: { email: "a@b.co", password: "x" }, auth: false });
 
     expect(mock.requestsFor("POST", "/auth/login")[0].headers.Authorization).toBeUndefined();
@@ -63,7 +61,6 @@ describe("api client", () => {
       status: 409,
       body: { error: "Version conflict", code: "STALE_VERSION", details: { currentVersion: 3 } },
     }));
-    setToken("tok");
 
     const error = await request("/items/abc", { method: "PATCH", body: { expectedVersion: 1 } }).catch(
       (caught: unknown) => caught,
@@ -107,12 +104,25 @@ describe("api client", () => {
     const mock = installFetchMock();
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
-    setToken("expired-token");
+    // With cookie auth the client cannot see the token, so "authenticated" means
+    // "the app currently holds a session" (the localStorage session flag).
+    setSession(true);
     mock.on("GET", "/auth/me", () => ({ status: 401, body: { error: "Invalid or expired token" } }));
 
     await expect(request("/auth/me")).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invoke the unauthorized handler when a sessionless request returns 401", async () => {
+    const mock = installFetchMock();
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    mock.on("GET", "/items", () => ({ status: 401, body: { error: "Invalid or expired token" } }));
+
+    await expect(request("/items")).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
   it("reports a transport failure as a status-0 ApiError", async () => {
@@ -129,7 +139,6 @@ describe("api client", () => {
     const mock = installFetchMock();
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    setToken("super-secret-token");
     mock.on("GET", "/items", () => ({ status: 500, body: { error: "Internal server error" } }));
 
     await request("/items").catch(() => undefined);

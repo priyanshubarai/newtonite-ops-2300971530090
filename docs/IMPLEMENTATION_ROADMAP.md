@@ -361,13 +361,13 @@ npm run test -- --run integration
 
 ### Verification Commands
 ```bash
-npm run test -- --run frontend   # -> frontend: npm test (65 tests, 8 files)
+npm run test -- --run frontend   # -> frontend: npm test (65 tests, 8 files when Phase 7 shipped; now 137 / 12 — see README)
 npm run build (frontend)         # -> frontend: npm run build (tsc && vite build)
 ```
 
 ### Status (implemented — Phase 7)
 
-Delivered and verified: `frontend npm test` (65 tests / 8 files, jsdom), `npm run typecheck`, `npm run build`, all exit `0`.
+Delivered and verified: `frontend npm test` (65 tests / 8 files at the time, jsdom — since grown to 137 / 12), `npm run typecheck`, `npm run build`, all exit `0`.
 
 Delivered: login with generic failure messaging, in-memory session with `GET /auth/me` identity + memberships, authenticated shell and route guard, server-filtered/paginated work-item list, detail view with claim and workflow-transition actions, create and edit forms with `expectedVersion` optimistic concurrency, stable idempotency keys, explicit stale-version / lost-claim / invalid-transition / forbidden handling, and loading/empty/error/retry/unauthorized states. No backend file was changed and no endpoint was added.
 

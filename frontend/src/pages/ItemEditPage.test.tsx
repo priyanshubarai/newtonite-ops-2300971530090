@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { installFetchMock } from "../test/mockFetch";
 import { MEMBER_MEMBERSHIP, VIEWER_MEMBERSHIP, makeItem, mockSession } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 const ITEM_PATH = /^\/items\/[0-9a-f-]{36}$/;
 
@@ -12,7 +12,7 @@ async function renderEditPage(
   mock: ReturnType<typeof installFetchMock>,
   memberships = [MEMBER_MEMBERSHIP],
 ) {
-  setToken("session-token");
+  setSession(true);
   mockSession(mock, { memberships });
   renderApp({ route: `/items/${makeItem().id}/edit` });
 }

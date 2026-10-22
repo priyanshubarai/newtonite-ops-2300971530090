@@ -54,7 +54,7 @@ interface Fixture {
 }
 
 let fx: Fixture;
-const tokens: Record<string, string> = {};
+const cookies: Record<string, string> = {};
 const emails: Record<string, string> = {};
 
 let keyCounter = 0;
@@ -69,8 +69,8 @@ async function makeUser(key: string, name: string): Promise<string> {
   return createTestUser(email, name);
 }
 
-function authed(token: string) {
-  return { Authorization: `Bearer ${token}` };
+function authed(cookie: string) {
+  return { Cookie: cookie };
 }
 
 async function login(key: string): Promise<string> {
@@ -80,7 +80,11 @@ async function login(key: string): Promise<string> {
   if (res.status !== 200) {
     throw new Error(`login failed for ${key}: ${res.status} ${JSON.stringify(res.body)}`);
   }
-  return res.body.token as string;
+  const cookie = res.headers["set-cookie"]?.[0] || "";
+  if (!cookie) {
+    throw new Error(`no auth_token cookie for ${key}`);
+  }
+  return cookie;
 }
 
 /** A fresh team-A work item with the given overrides (version always starts at 1). */
@@ -204,7 +208,7 @@ beforeAll(async () => {
     "dualMember",
     "outsider",
   ]) {
-    tokens[key] = await login(key);
+    cookies[key] = await login(key);
   }
 });
 
@@ -230,7 +234,7 @@ afterAll(async () => {
 describe("POST /items/:id/claim - atomic claim", () => {
   it("1. a member claims an unassigned, claimable item and the version increments", async () => {
     const id = await freshItem();
-    const res = await claimItem(id, tokens.memberA);
+    const res = await claimItem(id, cookies.memberA);
 
     expect(res.status).toBe(200);
     expect(res.body.assigneeId).toBe(fx.memberA);
@@ -249,7 +253,7 @@ describe("POST /items/:id/claim - atomic claim", () => {
 
   it("2. a viewer cannot claim (403) and nothing changes", async () => {
     const id = await freshItem();
-    const res = await claimItem(id, tokens.viewerA);
+    const res = await claimItem(id, cookies.viewerA);
 
     expect(res.status).toBe(403);
     expect((await getWorkItemRow(id))?.assigneeId).toBeNull();
@@ -259,7 +263,7 @@ describe("POST /items/:id/claim - atomic claim", () => {
 
   it("3. a non-member cannot claim an item in another team (404)", async () => {
     const id = await freshItem();
-    const res = await claimItem(id, tokens.memberB);
+    const res = await claimItem(id, cookies.memberB);
     expect(res.status).toBe(404);
     expect((await getWorkItemRow(id))?.assigneeId).toBeNull();
   });
@@ -267,8 +271,8 @@ describe("POST /items/:id/claim - atomic claim", () => {
   it("4. two concurrent claimants: exactly one succeeds, the other gets 409", async () => {
     const id = await freshItem();
     const [a, b] = await Promise.all([
-      claimItem(id, tokens.memberA),
-      claimItem(id, tokens.adminA),
+      claimItem(id, cookies.memberA),
+      claimItem(id, cookies.adminA),
     ]);
 
     const statuses = [a.status, b.status].sort((x, y) => x - y);
@@ -284,7 +288,7 @@ describe("POST /items/:id/claim - atomic claim", () => {
 
   it("5. the losing claim creates no success activity event or outbox job", async () => {
     const id = await freshItem();
-    await Promise.all([claimItem(id, tokens.memberA), claimItem(id, tokens.adminA)]);
+    await Promise.all([claimItem(id, cookies.memberA), claimItem(id, cookies.adminA)]);
 
     // Exactly one winner => exactly one assignee event and one outbox job.
     const events = await listActivityEvents(id);
@@ -295,12 +299,12 @@ describe("POST /items/:id/claim - atomic claim", () => {
 
   it("rejects claiming an already-assigned item (409) and a non-claimable status (409)", async () => {
     const assigned = await freshItem({ assigneeId: fx.leadA });
-    const reseat = await claimItem(assigned, tokens.memberA);
+    const reseat = await claimItem(assigned, cookies.memberA);
     expect(reseat.status).toBe(409);
     expect(reseat.body.code).toBe("ALREADY_ASSIGNED");
 
     const closed = await freshItem({ status: "CLOSED" });
-    const notClaimable = await claimItem(closed, tokens.memberA);
+    const notClaimable = await claimItem(closed, cookies.memberA);
     expect(notClaimable.status).toBe(409);
     expect(notClaimable.body.code).toBe("NOT_CLAIMABLE");
   });
@@ -312,11 +316,11 @@ describe("PATCH /items/:id - optimistic concurrency", () => {
   it("6/7. a valid expectedVersion commits and increments once; a stale one returns 409 STALE_VERSION", async () => {
     const id = await freshItem();
 
-    const ok = await patchItem(id, tokens.memberA, { title: "v2 title", expectedVersion: 1 });
+    const ok = await patchItem(id, cookies.memberA, { title: "v2 title", expectedVersion: 1 });
     expect(ok.status).toBe(200);
     expect(ok.body.version).toBe(2);
 
-    const stale = await patchItem(id, tokens.memberA, { title: "v3?", expectedVersion: 1 });
+    const stale = await patchItem(id, cookies.memberA, { title: "v3?", expectedVersion: 1 });
     expect(stale.status).toBe(409);
     expect(stale.body.code).toBe("STALE_VERSION");
   });
@@ -325,7 +329,7 @@ describe("PATCH /items/:id - optimistic concurrency", () => {
     const id = await freshItem();
     const before = await getWorkItemRow(id);
 
-    const stale = await patchItem(id, tokens.memberA, {
+    const stale = await patchItem(id, cookies.memberA, {
       title: "should not apply",
       priority: "CRITICAL",
       expectedVersion: 42,
@@ -343,8 +347,8 @@ describe("PATCH /items/:id - optimistic concurrency", () => {
   it("9. two concurrent updates with the same expectedVersion cannot both win", async () => {
     const id = await freshItem();
     const [a, b] = await Promise.all([
-      patchItem(id, tokens.memberA, { title: "writer A", expectedVersion: 1 }),
-      patchItem(id, tokens.memberA, { title: "writer B", expectedVersion: 1 }),
+      patchItem(id, cookies.memberA, { title: "writer A", expectedVersion: 1 }),
+      patchItem(id, cookies.memberA, { title: "writer B", expectedVersion: 1 }),
     ]);
 
     const statuses = [a.status, b.status].sort((x, y) => x - y);
@@ -364,14 +368,14 @@ describe("PATCH /items/:id - optimistic concurrency", () => {
   it("10. version increments across PATCH, claim, and transition", async () => {
     const id = await freshItem();
 
-    const patched = await patchItem(id, tokens.memberA, { title: "step 1", expectedVersion: 1 });
+    const patched = await patchItem(id, cookies.memberA, { title: "step 1", expectedVersion: 1 });
     expect(patched.body.version).toBe(2);
 
-    const claimed = await claimItem(id, tokens.memberA);
+    const claimed = await claimItem(id, cookies.memberA);
     expect(claimed.body.version).toBe(3);
     expect(claimed.body.assigneeId).toBe(fx.memberA);
 
-    const transitioned = await transitionItem(id, tokens.memberA, {
+    const transitioned = await transitionItem(id, cookies.memberA, {
       toStatus: "IN_PROGRESS",
       expectedVersion: 3,
     });
@@ -382,14 +386,14 @@ describe("PATCH /items/:id - optimistic concurrency", () => {
 
   it("11. clients cannot set the stored version directly", async () => {
     const id = await freshItem();
-    const patched = await patchItem(id, tokens.memberA, {
+    const patched = await patchItem(id, cookies.memberA, {
       title: "sneaky",
       version: 99,
       expectedVersion: 1,
     });
     expect(patched.status).toBe(400);
 
-    const created = await createItem(tokens.memberA, {
+    const created = await createItem(cookies.memberA, {
       title: "sneaky create",
       type: "TASK",
       priority: "LOW",
@@ -407,28 +411,28 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
   it("12. valid transitions succeed along OPEN -> ... -> CLOSED", async () => {
     const id = await freshItem();
 
-    const toProgress = await transitionItem(id, tokens.memberA, {
+    const toProgress = await transitionItem(id, cookies.memberA, {
       toStatus: "IN_PROGRESS",
       expectedVersion: 1,
     });
     expect(toProgress.status).toBe(200);
     expect(toProgress.body.status).toBe("IN_PROGRESS");
 
-    const toApproval = await transitionItem(id, tokens.memberA, {
+    const toApproval = await transitionItem(id, cookies.memberA, {
       toStatus: "AWAITING_APPROVAL",
       expectedVersion: 2,
     });
     expect(toApproval.status).toBe(200);
     expect(toApproval.body.status).toBe("AWAITING_APPROVAL");
 
-    const toResolved = await transitionItem(id, tokens.leadA, {
+    const toResolved = await transitionItem(id, cookies.leadA, {
       toStatus: "RESOLVED",
       expectedVersion: 3,
     });
     expect(toResolved.status).toBe(200);
     expect(toResolved.body.status).toBe("RESOLVED");
 
-    const toClosed = await transitionItem(id, tokens.memberA, {
+    const toClosed = await transitionItem(id, cookies.memberA, {
       toStatus: "CLOSED",
       expectedVersion: 4,
     });
@@ -448,7 +452,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
 
   it("13. skipping a state is rejected (409 INVALID_TRANSITION)", async () => {
     const id = await freshItem();
-    const res = await transitionItem(id, tokens.memberA, {
+    const res = await transitionItem(id, cookies.memberA, {
       toStatus: "AWAITING_APPROVAL",
       expectedVersion: 1,
     });
@@ -460,20 +464,20 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
 
   it("14. status cannot be changed through PATCH", async () => {
     const id = await freshItem();
-    const res = await patchItem(id, tokens.memberA, { status: "CLOSED", expectedVersion: 1 });
+    const res = await patchItem(id, cookies.memberA, { status: "CLOSED", expectedVersion: 1 });
     expect(res.status).toBe(400);
   });
 
   it("15. a viewer or member cannot approve out of AWAITING_APPROVAL", async () => {
     const item = () => freshItem({ status: "AWAITING_APPROVAL" });
 
-    const byViewer = await transitionItem(await item(), tokens.viewerA, {
+    const byViewer = await transitionItem(await item(), cookies.viewerA, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
     expect(byViewer.status).toBe(403);
 
-    const byMember = await transitionItem(await item(), tokens.memberA, {
+    const byMember = await transitionItem(await item(), cookies.memberA, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
@@ -482,7 +486,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
 
   it("16. a lead/admin of the item's own team can approve", async () => {
     const id1 = await freshItem({ status: "AWAITING_APPROVAL" });
-    const asLead = await transitionItem(id1, tokens.leadA, {
+    const asLead = await transitionItem(id1, cookies.leadA, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
@@ -490,7 +494,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
     expect(asLead.body.status).toBe("RESOLVED");
 
     const id2 = await freshItem({ status: "AWAITING_APPROVAL" });
-    const asAdmin = await transitionItem(id2, tokens.adminA, {
+    const asAdmin = await transitionItem(id2, cookies.adminA, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
@@ -500,7 +504,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
   it("17. a lead/admin from a different team cannot approve", async () => {
     // leadB is a LEAD - but only in team B, so team A's item is invisible (404).
     const id1 = await freshItem({ status: "AWAITING_APPROVAL" });
-    const byForeignLead = await transitionItem(id1, tokens.leadB, {
+    const byForeignLead = await transitionItem(id1, cookies.leadB, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
@@ -509,7 +513,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
     // dualMember is a LEAD in team B and a MEMBER in team A: the team-B role
     // must not authorize approval in team A (403, not 200).
     const id2 = await freshItem({ status: "AWAITING_APPROVAL" });
-    const byDual = await transitionItem(id2, tokens.dualMember, {
+    const byDual = await transitionItem(id2, cookies.dualMember, {
       toStatus: "RESOLVED",
       expectedVersion: 1,
     });
@@ -520,7 +524,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
   it("18. a closed item cannot be reopened", async () => {
     const id = await freshItem({ status: "CLOSED" });
     for (const toStatus of ["OPEN", "IN_PROGRESS", "RESOLVED"]) {
-      const res = await transitionItem(id, tokens.leadA, { toStatus, expectedVersion: 1 });
+      const res = await transitionItem(id, cookies.leadA, { toStatus, expectedVersion: 1 });
       expect(res.status, toStatus).toBe(409);
       expect(res.body.code).toBe("INVALID_TRANSITION");
     }
@@ -529,7 +533,7 @@ describe("POST /items/:id/transition - workflow enforcement", () => {
 
   it("19. a stale transition is rejected with no side effects", async () => {
     const id = await freshItem({ status: "AWAITING_APPROVAL" });
-    const res = await transitionItem(id, tokens.leadA, {
+    const res = await transitionItem(id, cookies.leadA, {
       toStatus: "RESOLVED",
       expectedVersion: 5,
     });
@@ -549,10 +553,10 @@ describe("Idempotency-Key handling", () => {
     const title = `Idempotent create ${key}`;
     const body = { title, type: "TASK", priority: "LOW", teamId: fx.teamA };
 
-    const first = await createItem(tokens.memberA, body, key);
+    const first = await createItem(cookies.memberA, body, key);
     expect(first.status).toBe(201);
 
-    const replay = await createItem(tokens.memberA, body, key);
+    const replay = await createItem(cookies.memberA, body, key);
     expect(replay.status).toBe(201);
     expect(replay.body.id).toBe(first.body.id);
     expect(replay.body.version).toBe(first.body.version);
@@ -567,9 +571,9 @@ describe("Idempotency-Key handling", () => {
     const key = uniqueIdempotencyKey();
     const body = { title: `Reuse base ${key}`, type: "TASK", priority: "LOW", teamId: fx.teamA };
 
-    expect((await createItem(tokens.memberA, body, key)).status).toBe(201);
+    expect((await createItem(cookies.memberA, body, key)).status).toBe(201);
 
-    const reused = await createItem(tokens.memberA, { ...body, priority: "HIGH" }, key);
+    const reused = await createItem(cookies.memberA, { ...body, priority: "HIGH" }, key);
     expect(reused.status).toBe(409);
     expect(reused.body.code).toBe("IDEMPOTENCY_KEY_REUSED");
   });
@@ -580,8 +584,8 @@ describe("Idempotency-Key handling", () => {
     const body = { title, type: "TASK", priority: "MEDIUM", teamId: fx.teamA };
 
     const [a, b] = await Promise.all([
-      createItem(tokens.memberA, body, key),
-      createItem(tokens.memberA, body, key),
+      createItem(cookies.memberA, body, key),
+      createItem(cookies.memberA, body, key),
     ]);
 
     expect([a.status, b.status]).toEqual([201, 201]);
@@ -602,16 +606,16 @@ describe("Idempotency-Key handling", () => {
       teamId: fx.teamB,
     };
 
-    const first = await createItem(tokens.memberA, bad, key);
+    const first = await createItem(cookies.memberA, bad, key);
     expect(first.status).toBe(404);
 
-    const retry = await createItem(tokens.memberA, bad, key);
+    const retry = await createItem(cookies.memberA, bad, key);
     expect(retry.status).toBe(404); // re-executed, not a cached 2xx
     expect(await countItemsByTitle(fx.teamB, badTitle)).toBe(0);
 
     // The key was not consumed by the failure: a valid payload under it works.
     const good = await createItem(
-      tokens.memberA,
+      cookies.memberA,
       { title: `After failure ${key}`, type: "TASK", priority: "LOW", teamId: fx.teamA },
       key,
     );
@@ -623,8 +627,8 @@ describe("Idempotency-Key handling", () => {
     const body = { title: `Racing failure ${key}`, type: "TASK", priority: "LOW", teamId: fx.teamB };
 
     const [a, b] = await Promise.all([
-      createItem(tokens.memberA, body, key),
-      createItem(tokens.memberA, body, key),
+      createItem(cookies.memberA, body, key),
+      createItem(cookies.memberA, body, key),
     ]);
     expect([a.status, b.status]).toEqual([404, 404]);
     expect(await countItemsByTitle(fx.teamB, body.title)).toBe(0);
@@ -636,13 +640,13 @@ describe("Idempotency-Key handling", () => {
     const patchKey = uniqueIdempotencyKey();
     const p1 = await patchItem(
       patchTarget,
-      tokens.memberA,
+      cookies.memberA,
       { title: "idempotent patch", expectedVersion: 1 },
       patchKey,
     );
     const p2 = await patchItem(
       patchTarget,
-      tokens.memberA,
+      cookies.memberA,
       { title: "idempotent patch", expectedVersion: 1 },
       patchKey,
     );
@@ -656,8 +660,8 @@ describe("Idempotency-Key handling", () => {
     // CLAIM
     const claimTarget = await freshItem();
     const claimKey = uniqueIdempotencyKey();
-    const c1 = await claimItem(claimTarget, tokens.memberA, claimKey);
-    const c2 = await claimItem(claimTarget, tokens.memberA, claimKey);
+    const c1 = await claimItem(claimTarget, cookies.memberA, claimKey);
+    const c2 = await claimItem(claimTarget, cookies.memberA, claimKey);
     expect([c1.status, c2.status]).toEqual([200, 200]);
     expect(c2.body.assigneeId).toBe(fx.memberA);
     expect((await getWorkItemRow(claimTarget))?.version).toBe(2);
@@ -669,13 +673,13 @@ describe("Idempotency-Key handling", () => {
     const transitionKey = uniqueIdempotencyKey();
     const t1 = await transitionItem(
       transitionTarget,
-      tokens.memberA,
+      cookies.memberA,
       { toStatus: "IN_PROGRESS", expectedVersion: 1 },
       transitionKey,
     );
     const t2 = await transitionItem(
       transitionTarget,
-      tokens.memberA,
+      cookies.memberA,
       { toStatus: "IN_PROGRESS", expectedVersion: 1 },
       transitionKey,
     );
@@ -692,7 +696,7 @@ describe("Idempotency-Key handling", () => {
 describe("Transactional activity + outbox consistency", () => {
   it("25. each successful mutation writes the matching, attributed activity event", async () => {
     // CREATE -> ITEM_CREATED
-    const created = await createItem(tokens.memberA, {
+    const created = await createItem(cookies.memberA, {
       title: `Audited create ${uniqueIdempotencyKey()}`,
       type: "INCIDENT",
       priority: "HIGH",
@@ -708,12 +712,12 @@ describe("Transactional activity + outbox consistency", () => {
     // PATCH priority -> PRIORITY_CHANGED; PATCH title -> ITEM_UPDATED
     const target = await freshItem();
     const originalTitle = (await getWorkItemRow(target))!.title;
-    const priorityChange = await patchItem(target, tokens.memberA, {
+    const priorityChange = await patchItem(target, cookies.memberA, {
       priority: "CRITICAL",
       expectedVersion: 1,
     });
     expect(priorityChange.status).toBe(200);
-    const titleChange = await patchItem(target, tokens.memberA, {
+    const titleChange = await patchItem(target, cookies.memberA, {
       title: "documented change",
       expectedVersion: 2,
     });
@@ -770,7 +774,7 @@ describe("Transactional activity + outbox consistency", () => {
 
   it("27. an outbox job is inserted atomically with a successful create", async () => {
     const title = `Outbox create ${uniqueIdempotencyKey()}`;
-    const res = await createItem(tokens.memberA, {
+    const res = await createItem(cookies.memberA, {
       title,
       type: "PAYMENT",
       priority: "LOW",
@@ -790,15 +794,15 @@ describe("Transactional activity + outbox consistency", () => {
     const id = await freshItem();
 
     // Unauthorized (viewer).
-    expect((await patchItem(id, tokens.viewerA, { title: "x", expectedVersion: 1 })).status).toBe(403);
+    expect((await patchItem(id, cookies.viewerA, { title: "x", expectedVersion: 1 })).status).toBe(403);
     // Stale version.
-    expect((await patchItem(id, tokens.memberA, { title: "x", expectedVersion: 9 })).status).toBe(409);
+    expect((await patchItem(id, cookies.memberA, { title: "x", expectedVersion: 9 })).status).toBe(409);
     // Invalid transition.
     expect(
-      (await transitionItem(id, tokens.memberA, { toStatus: "RESOLVED", expectedVersion: 1 })).status,
+      (await transitionItem(id, cookies.memberA, { toStatus: "RESOLVED", expectedVersion: 1 })).status,
     ).toBe(409);
     // Unauthorized claim.
-    expect((await claimItem(id, tokens.viewerA)).status).toBe(403);
+    expect((await claimItem(id, cookies.viewerA)).status).toBe(403);
 
     expect(await countActivityEvents(id)).toBe(0);
     expect(await countOutboxJobs(id)).toBe(0);
@@ -813,7 +817,7 @@ describe("Transactional activity + outbox consistency", () => {
     const id = await freshItem();
     const key = uniqueIdempotencyKey();
 
-    const res = await createComment(id, tokens.memberA, { body: "Test comment" }, key);
+    const res = await createComment(id, cookies.memberA, { body: "Test comment" }, key);
     expect(res.status).toBe(201);
 
     expect(await countComments(id)).toBe(1);
@@ -830,10 +834,10 @@ describe("Transactional activity + outbox consistency", () => {
     const key1 = uniqueIdempotencyKey();
     const key2 = uniqueIdempotencyKey();
 
-    const res1 = await createComment(id, tokens.memberA, { body: "First comment" }, key1);
+    const res1 = await createComment(id, cookies.memberA, { body: "First comment" }, key1);
     expect(res1.status).toBe(201);
 
-    const res2 = await createComment(id, tokens.memberA, { body: "Second comment" }, key2);
+    const res2 = await createComment(id, cookies.memberA, { body: "Second comment" }, key2);
     expect(res2.status).toBe(201);
 
     expect(await countComments(id)).toBe(2);
@@ -844,16 +848,18 @@ describe("Transactional activity + outbox consistency", () => {
     // Both should be COMMENT_ADDED
     expect(activity.every((a) => a.eventType === "COMMENT_ADDED")).toBe(true);
     // Different comment IDs
-    expect(activity[0].metadata.commentId).not.toBe(activity[1].metadata.commentId);
+    const metadata0 = activity[0].metadata as { commentId: string };
+    const metadata1 = activity[1].metadata as { commentId: string };
+    expect(metadata0.commentId).not.toBe(metadata1.commentId);
   });
 
   it("31. activity endpoint returns COMMENT_ADDED events for the work item", async () => {
     const id = await freshItem();
     const key = uniqueIdempotencyKey();
 
-    await createComment(id, tokens.memberA, { body: "Comment for activity test" }, key);
+    await createComment(id, cookies.memberA, { body: "Comment for activity test" }, key);
 
-    const res = await request(app).get(`/items/${id}/activity`).set(authed(tokens.memberA));
+    const res = await request(app).get(`/items/${id}/activity`).set(authed(cookies.memberA));
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].eventType).toBe("COMMENT_ADDED");
@@ -865,10 +871,10 @@ describe("Transactional activity + outbox consistency", () => {
     const key = uniqueIdempotencyKey();
     const body = { body: "Idempotent comment" };
 
-    const res1 = await createComment(id, tokens.memberA, body, key);
+    const res1 = await createComment(id, cookies.memberA, body, key);
     expect(res1.status).toBe(201);
 
-    const res2 = await createComment(id, tokens.memberA, body, key);
+    const res2 = await createComment(id, cookies.memberA, body, key);
     expect(res2.status).toBe(201);
     expect(res2.body).toEqual(res1.body);
 
@@ -882,17 +888,77 @@ describe("Transactional activity + outbox consistency", () => {
 
     // Post to a different team (unauthorized) - should fail
     const badBody = { body: "Unauthorized comment" };
-    const res = await createComment(id, tokens.memberB, badBody, key);
+    const res = await createComment(id, cookies.memberB, badBody, key);
     expect(res.status).toBe(404);
 
     expect(await countComments(id)).toBe(0);
     expect(await countActivityEvents(id)).toBe(0);
 
     // The key was not consumed by the failure: a valid payload under it works
-    const good = await createComment(id, tokens.memberA, { body: "Valid comment" }, key);
+    const good = await createComment(id, cookies.memberA, { body: "Valid comment" }, key);
     expect(good.status).toBe(201);
 
     expect(await countComments(id)).toBe(1);
     expect(await countActivityEvents(id)).toBe(1);
+  });
+
+  // Reading comments back
+  it("34. comments endpoint returns the comments written for the work item", async () => {
+    const id = await freshItem();
+
+    const res = await request(app).get(`/items/${id}/comments`).set(authed(cookies.memberA));
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(0);
+    expect(res.body.pagination.total).toBe(0);
+
+    const created = await createComment(id, cookies.memberA, { body: "First note" }, uniqueIdempotencyKey());
+    expect(created.status).toBe(201);
+    await createComment(id, cookies.memberA, { body: "Second note" }, uniqueIdempotencyKey());
+
+    const listed = await request(app).get(`/items/${id}/comments`).set(authed(cookies.memberA));
+    expect(listed.status).toBe(200);
+    expect(listed.body.items).toHaveLength(2);
+    expect(listed.body.pagination.total).toBe(2);
+
+    const bodies = listed.body.items.map((c: { body: string }) => c.body);
+    expect(bodies).toContain("First note");
+    expect(bodies).toContain("Second note");
+    // The reader is identified and the author id is carried, never a password.
+    expect(listed.body.items[0].authorId).toBeTruthy();
+  });
+
+  it("35. comments endpoint is team-scoped: a non-member team gets 404, not an empty list", async () => {
+    const id = await freshItem();
+    await createComment(id, cookies.memberA, { body: "Team A only" }, uniqueIdempotencyKey());
+
+    // memberB belongs to team B, not team A.
+    const res = await request(app).get(`/items/${id}/comments`).set(authed(cookies.memberB));
+    expect(res.status).toBe(404);
+
+    // A viewer of team A is a member of the team, so the read is allowed.
+    const viewer = await request(app).get(`/items/${id}/comments`).set(authed(cookies.viewerA));
+    expect(viewer.status).toBe(200);
+    expect(viewer.body.items).toHaveLength(1);
+  });
+
+  it("36. comments endpoint paginates and rejects a malformed id", async () => {
+    const id = await freshItem();
+    await createComment(id, cookies.memberA, { body: "Note 1" }, uniqueIdempotencyKey());
+    await createComment(id, cookies.memberA, { body: "Note 2" }, uniqueIdempotencyKey());
+
+    const page = await request(app)
+      .get(`/items/${id}/comments`)
+      .query({ page: 1, pageSize: 1 })
+      .set(authed(cookies.memberA));
+    expect(page.status).toBe(200);
+    expect(page.body.items).toHaveLength(1);
+    expect(page.body.pagination.total).toBe(2);
+    expect(page.body.pagination.pageSize).toBe(1);
+    expect(page.body.pagination.hasNextPage).toBe(true);
+
+    // A malformed id is answered with 404, not 400, so a caller cannot tell a
+    // bad id from an id that does not exist. This matches GET /items/:id.
+    const bad = await request(app).get("/items/not-a-uuid/comments").set(authed(cookies.memberA));
+    expect(bad.status).toBe(404);
   });
 });

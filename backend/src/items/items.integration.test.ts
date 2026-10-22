@@ -37,7 +37,7 @@ interface Fixture {
 }
 
 let fx: Fixture;
-const tokens: Record<string, string> = {};
+const cookies: Record<string, string> = {};
 const emails: Record<string, string> = {};
 
 async function makeUser(key: string, name: string): Promise<string> {
@@ -48,8 +48,22 @@ async function makeUser(key: string, name: string): Promise<string> {
   return createTestUser(email, name);
 }
 
-function authed(token: string) {
-  return { Authorization: `Bearer ${token}` };
+function authed(cookie: string) {
+  return { Cookie: cookie };
+}
+
+async function login(key: string): Promise<string> {
+  const res = await request(app)
+    .post("/auth/login")
+    .send({ email: emails[key], password: TEST_PASSWORD });
+  if (res.status !== 200) {
+    throw new Error(`login failed for ${key}: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  const cookie = res.headers["set-cookie"]?.[0] || "";
+  if (!cookie) {
+    throw new Error(`no auth_token cookie for ${key}`);
+  }
+  return cookie;
 }
 
 beforeAll(async () => {
@@ -119,13 +133,7 @@ beforeAll(async () => {
   });
 
   for (const key of ["viewerA", "memberA", "leadA", "adminA", "memberB", "outsider"]) {
-    const res = await request(app)
-      .post("/auth/login")
-      .send({ email: emails[key], password: TEST_PASSWORD });
-    if (res.status !== 200) {
-      throw new Error(`login failed for ${key}: ${res.status} ${JSON.stringify(res.body)}`);
-    }
-    tokens[key] = res.body.token;
+    cookies[key] = await login(key);
   }
 });
 
@@ -137,8 +145,8 @@ afterAll(async () => {
   await pool.end();
 });
 
-function listItems(token: string, query = "") {
-  return request(app).get(`/items${query}`).set(authed(token));
+function listItems(cookie: string, query = "") {
+  return request(app).get(`/items${query}`).set(authed(cookie));
 }
 
 describe("GET /items - listing, scoping, filtering", () => {
@@ -147,7 +155,7 @@ describe("GET /items - listing, scoping, filtering", () => {
   });
 
   it("returns only items from teams the caller belongs to", async () => {
-    const res = await listItems(tokens.memberA);
+    const res = await listItems(cookies.memberA);
     expect(res.status).toBe(200);
 
     const titles = res.body.items.map((i: WorkItemRow) => i.title);
@@ -163,61 +171,61 @@ describe("GET /items - listing, scoping, filtering", () => {
   });
 
   it("does not disclose items when filtering by a non-member team", async () => {
-    const res = await listItems(tokens.memberA, `?teamId=${fx.teamB}`);
+    const res = await listItems(cookies.memberA, `?teamId=${fx.teamB}`);
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([]);
     expect(res.body.pagination.total).toBe(0);
   });
 
   it("scopes to a member team when an explicit team filter is supplied", async () => {
-    const res = await listItems(tokens.memberA, `?teamId=${fx.teamA}`);
+    const res = await listItems(cookies.memberA, `?teamId=${fx.teamA}`);
     expect(res.status).toBe(200);
     expect(res.body.pagination.total).toBe(3);
     expect(res.body.items.every((i: WorkItemRow) => i.teamId === fx.teamA)).toBe(true);
   });
 
   it("applies status, priority, and assignee filters", async () => {
-    const byStatus = await listItems(tokens.memberA, "?status=OPEN");
+    const byStatus = await listItems(cookies.memberA, "?status=OPEN");
     expect(byStatus.body.items.map((i: WorkItemRow) => i.title).sort()).toEqual(
       ["Alpha incident", "Gamma compliance"].sort(),
     );
 
-    const byPriority = await listItems(tokens.memberA, "?priority=LOW");
+    const byPriority = await listItems(cookies.memberA, "?priority=LOW");
     expect(byPriority.body.items.map((i: WorkItemRow) => i.title)).toEqual(["Beta payment"]);
 
-    const byAssignee = await listItems(tokens.memberA, `?assigneeId=${fx.memberA}`);
+    const byAssignee = await listItems(cookies.memberA, `?assigneeId=${fx.memberA}`);
     expect(byAssignee.body.items.map((i: WorkItemRow) => i.title)).toEqual(["Alpha incident"]);
   });
 
   it("searches title and description (case-insensitive, literal wildcards)", async () => {
-    const byTitle = await listItems(tokens.memberA, "?search=gamma");
+    const byTitle = await listItems(cookies.memberA, "?search=gamma");
     expect(byTitle.body.items.map((i: WorkItemRow) => i.title)).toEqual(["Gamma compliance"]);
 
-    const byDescription = await listItems(tokens.memberA, "?search=settlement");
+    const byDescription = await listItems(cookies.memberA, "?search=settlement");
     expect(byDescription.body.items.map((i: WorkItemRow) => i.title)).toEqual(["Beta payment"]);
 
     // A literal '%' should match nothing rather than acting as a wildcard.
-    const literal = await listItems(tokens.memberA, "?search=%25");
+    const literal = await listItems(cookies.memberA, "?search=%25");
     expect(literal.body.items).toEqual([]);
   });
 
   it("paginates with defaults, respects the page-size cap, and reports exact totals", async () => {
-    const firstPage = await listItems(tokens.memberA, `?teamId=${fx.teamA}&page=1&pageSize=2`);
+    const firstPage = await listItems(cookies.memberA, `?teamId=${fx.teamA}&page=1&pageSize=2`);
     expect(firstPage.body.items).toHaveLength(2);
     expect(firstPage.body.pagination.total).toBe(3);
     expect(firstPage.body.pagination.totalPages).toBe(2);
     expect(firstPage.body.pagination.hasNextPage).toBe(true);
     expect(firstPage.body.pagination.hasPrevPage).toBe(false);
 
-    const secondPage = await listItems(tokens.memberA, `?teamId=${fx.teamA}&page=2&pageSize=2`);
+    const secondPage = await listItems(cookies.memberA, `?teamId=${fx.teamA}&page=2&pageSize=2`);
     expect(secondPage.body.items).toHaveLength(1);
     expect(secondPage.body.pagination.hasNextPage).toBe(false);
     expect(secondPage.body.pagination.hasPrevPage).toBe(true);
 
     // The cap is enforced (rejected, not silently clamped).
-    const overCap = await listItems(tokens.memberA, "?pageSize=101");
+    const overCap = await listItems(cookies.memberA, "?pageSize=101");
     expect(overCap.status).toBe(400);
-    const atCap = await listItems(tokens.memberA, "?pageSize=100");
+    const atCap = await listItems(cookies.memberA, "?pageSize=100");
     expect(atCap.status).toBe(200);
   });
 
@@ -241,7 +249,7 @@ describe("GET /items - listing, scoping, filtering", () => {
       `?search=${"x".repeat(201)}`,
     ];
     for (const q of cases) {
-      const res = await listItems(tokens.memberA, q);
+      const res = await listItems(cookies.memberA, q);
       expect(res.status, `expected 400 for ${q}`).toBe(400);
     }
   });
@@ -249,7 +257,7 @@ describe("GET /items - listing, scoping, filtering", () => {
   it("orders deterministically with an id tie-breaker", async () => {
     // A1 and A3 share a due date. Tie-break is id ascending regardless of the
     // requested direction, so the ordering is stable and provable.
-    const asc = await listItems(tokens.memberA, `?teamId=${fx.teamA}&sort=dueAt&order=asc&pageSize=100`);
+    const asc = await listItems(cookies.memberA, `?teamId=${fx.teamA}&sort=dueAt&order=asc&pageSize=100`);
     const items = asc.body.items as WorkItemRow[];
     const dueAtA1 = items.findIndex((i) => i.title === "Alpha incident");
     const dueAtA3 = items.findIndex((i) => i.title === "Gamma compliance");
@@ -265,7 +273,7 @@ describe("GET /items - listing, scoping, filtering", () => {
     }
 
     // Repeating the same request yields the identical ordering.
-    const repeat = await listItems(tokens.memberA, `?teamId=${fx.teamA}&sort=dueAt&order=asc&pageSize=100`);
+    const repeat = await listItems(cookies.memberA, `?teamId=${fx.teamA}&sort=dueAt&order=asc&pageSize=100`);
     expect(repeat.body.items.map((i: WorkItemRow) => i.id)).toEqual(items.map((i) => i.id));
   });
 });
@@ -279,7 +287,7 @@ describe("POST /items - creation", () => {
   it("lets a MEMBER create an item with server-owned fields set", async () => {
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({
         title: "  New customer issue  ",
         description: "Reported via support",
@@ -301,7 +309,7 @@ describe("POST /items - creation", () => {
   it("rejects a VIEWER creating an item with 403", async () => {
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.viewerA))
+      .set(authed(cookies.viewerA))
       .send({ title: "Nope", type: "TASK", priority: "LOW", teamId: fx.teamA });
     expect(res.status).toBe(403);
   });
@@ -309,7 +317,7 @@ describe("POST /items - creation", () => {
   it("conceals a non-member team as 404", async () => {
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "Cross team", type: "TASK", priority: "LOW", teamId: fx.teamB });
     expect(res.status).toBe(404);
   });
@@ -325,7 +333,7 @@ describe("POST /items - creation", () => {
     ]) {
       const res = await request(app)
         .post("/items")
-        .set(authed(tokens.memberA))
+        .set(authed(cookies.memberA))
         .send({ ...base, ...protectedField });
       expect(res.status, JSON.stringify(protectedField)).toBe(400);
     }
@@ -341,7 +349,7 @@ describe("POST /items - creation", () => {
       { type: "TASK", priority: "LOW", teamId: fx.teamA }, // missing title
     ];
     for (const body of cases) {
-      const res = await request(app).post("/items").set(authed(tokens.memberA)).send(body);
+      const res = await request(app).post("/items").set(authed(cookies.memberA)).send(body);
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
   });
@@ -350,7 +358,7 @@ describe("POST /items - creation", () => {
     for (const assigneeId of [fx.memberB, fx.outsider]) {
       const res = await request(app)
         .post("/items")
-        .set(authed(tokens.memberA))
+        .set(authed(cookies.memberA))
         .send({ title: "Assign", type: "TASK", priority: "LOW", teamId: fx.teamA, assigneeId });
       expect(res.status, `assignee ${assigneeId}`).toBe(400);
     }
@@ -389,7 +397,7 @@ describe("GET /items/:id - detail", () => {
   });
 
   it("returns a permitted team's item with only safe fields", async () => {
-    const res = await request(app).get(`/items/${itemAId}`).set(authed(tokens.memberA));
+    const res = await request(app).get(`/items/${itemAId}`).set(authed(cookies.memberA));
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(itemAId);
     expect(res.body.title).toBe("Detail target A");
@@ -398,22 +406,22 @@ describe("GET /items/:id - detail", () => {
   });
 
   it("conceals another team's item as 404", async () => {
-    const res = await request(app).get(`/items/${itemBId}`).set(authed(tokens.memberA));
+    const res = await request(app).get(`/items/${itemBId}`).set(authed(cookies.memberA));
     expect(res.status).toBe(404);
   });
 
   it("returns 404 for a non-member caller (no enumeration)", async () => {
-    const res = await request(app).get(`/items/${itemAId}`).set(authed(tokens.outsider));
+    const res = await request(app).get(`/items/${itemAId}`).set(authed(cookies.outsider));
     expect(res.status).toBe(404);
   });
 
   it("returns 404 for malformed and unknown ids", async () => {
-    expect((await request(app).get("/items/not-a-uuid").set(authed(tokens.memberA))).status).toBe(404);
+    expect((await request(app).get("/items/not-a-uuid").set(authed(cookies.memberA))).status).toBe(404);
     expect(
       (
         await request(app)
           .get("/items/00000000-0000-4000-8000-000000000000")
-          .set(authed(tokens.memberA))
+          .set(authed(cookies.memberA))
       ).status,
     ).toBe(404);
   });
@@ -445,7 +453,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     const itemId = await freshItem();
     const res = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "Updated title", priority: "HIGH", assigneeId: fx.memberA, expectedVersion: 1 });
 
     expect(res.status).toBe(200);
@@ -456,7 +464,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     expect(res.body.status).toBe("OPEN"); // unchanged (status only moves via /transition)
 
     // The change is persisted, not just echoed.
-    const after = await request(app).get(`/items/${itemId}`).set(authed(tokens.memberA));
+    const after = await request(app).get(`/items/${itemId}`).set(authed(cookies.memberA));
     expect(after.body.version).toBe(2);
     expect(after.body.title).toBe("Updated title");
   });
@@ -467,14 +475,14 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     // Missing expectedVersion is a validation failure.
     const missing = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "no version" });
     expect(missing.status).toBe(400);
 
     // A wrong version is a conflict.
     const stale = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "stale", expectedVersion: 99 });
     expect(stale.status).toBe(409);
     expect(stale.body.code).toBe("STALE_VERSION");
@@ -484,7 +492,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     const itemId = await freshItem();
     const res = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.viewerA))
+      .set(authed(cookies.viewerA))
       .send({ title: "Changed by viewer", expectedVersion: 1 });
     expect(res.status).toBe(403);
   });
@@ -500,7 +508,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     });
     const res = await request(app)
       .patch(`/items/${bItem}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "hijack", expectedVersion: 1 });
     expect(res.status).toBe(404);
   });
@@ -519,7 +527,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     for (const body of cases) {
       const res = await request(app)
         .patch(`/items/${itemId}`)
-        .set(authed(tokens.memberA))
+        .set(authed(cookies.memberA))
         .send({ ...body, expectedVersion: 1 });
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
@@ -540,7 +548,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     for (const body of cases) {
       const res = await request(app)
         .patch(`/items/${itemId}`)
-        .set(authed(tokens.memberA))
+        .set(authed(cookies.memberA))
         .send(body);
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
@@ -551,7 +559,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
       const itemId = await freshItem();
       const res = await request(app)
         .patch(`/items/${itemId}`)
-        .set(authed(tokens.memberA))
+        .set(authed(cookies.memberA))
         .send({ assigneeId, expectedVersion: 1 });
       expect(res.status, `assignee ${assigneeId}`).toBe(400);
     }
@@ -561,7 +569,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     const itemId = await freshItem(fx.memberA);
     const res = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ assigneeId: null, expectedVersion: 1 });
     expect(res.status).toBe(200);
     expect(res.body.assigneeId).toBeNull();
@@ -573,7 +581,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
       (
         await request(app)
           .patch("/items/not-a-uuid")
-          .set(authed(tokens.memberA))
+          .set(authed(cookies.memberA))
           .send({ title: "x", expectedVersion: 1 })
       ).status,
     ).toBe(404);
@@ -581,7 +589,7 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
       (
         await request(app)
           .patch("/items/00000000-0000-4000-8000-000000000000")
-          .set(authed(tokens.memberA))
+          .set(authed(cookies.memberA))
           .send({ title: "x", expectedVersion: 1 })
       ).status,
     ).toBe(404);
@@ -591,9 +599,9 @@ describe("PATCH /items/:id - update (optimistic concurrency)", () => {
     const itemId = await freshItem();
     const res = await request(app)
       .patch(`/items/${itemId}`)
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "sneaky", version: 99, expectedVersion: 1 });
     expect(res.status).toBe(400);
-    expect((await request(app).get(`/items/${itemId}`).set(authed(tokens.memberA))).body.version).toBe(1);
+    expect((await request(app).get(`/items/${itemId}`).set(authed(cookies.memberA))).body.version).toBe(1);
   });
 });

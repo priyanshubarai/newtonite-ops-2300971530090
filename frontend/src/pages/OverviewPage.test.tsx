@@ -3,15 +3,15 @@ import { screen, within } from "@testing-library/react";
 import { installFetchMock } from "../test/mockFetch";
 import { TEST_USER, makeItem, mockItemList, mockSession } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 async function renderOverview(mock: ReturnType<typeof installFetchMock>) {
-  setToken("session-token");
+  setSession(true);
   mockSession(mock);
   renderApp({ route: "/overview" });
-  // The table is the last thing to render, so waiting for it means the metric
-  // row above it has resolved too.
-  await screen.findByRole("table");
+  // The metric cards are the last thing to render, so waiting for them means
+  // the data has resolved.
+  await screen.findByText("Total Items");
 }
 
 describe("OverviewPage metric cards", () => {
@@ -84,7 +84,7 @@ describe("OverviewPage metric cards", () => {
     const mock = installFetchMock();
     mockItemList(mock, []);
 
-    setToken("session-token");
+    setSession(true);
     mockSession(mock);
     renderApp({ route: "/overview" });
 

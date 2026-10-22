@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { installFetchMock } from "../test/mockFetch";
 import { makeItem, mockItemList, mockSession } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 /**
  * The global header search.
@@ -20,7 +20,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/overview" });
@@ -38,7 +38,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     const { queryClient } = renderApp({ route: "/overview" });
@@ -60,7 +60,7 @@ describe("global search", () => {
     mockItemList(mock, [
       makeItem({ id: "55555555-5555-4555-8555-555555555555", title: "Latency spike on checkout" }),
     ]);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/overview" });
@@ -86,7 +86,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/overview" });
@@ -110,7 +110,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, []);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/overview" });
@@ -131,7 +131,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mock.on("GET", "/items", () => ({ status: 500, body: { error: "Internal server error" } }));
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/items" });
@@ -154,7 +154,7 @@ describe("global search", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/items" });

@@ -49,16 +49,18 @@ app.use(
 );
 
 // Rate limiter for login endpoint (5 requests per minute per IP)
+// Configurable via env for tests - use higher limits to avoid false positives
 const loginLimiter = new RateLimiterMemory({
-  points: 5,
-  duration: 60,
-  blockDuration: 60 * 15, // 15 minutes block
+  points: Number(process.env.LOGIN_RATE_LIMIT_POINTS) || 5,
+  duration: Number(process.env.LOGIN_RATE_LIMIT_DURATION) || 60,
+  blockDuration: Number(process.env.LOGIN_RATE_LIMIT_BLOCK_DURATION) || 60 * 15,
 });
 
 // General API rate limiter (100 requests per minute per IP)
+// Configurable via env for tests
 const apiLimiter = new RateLimiterMemory({
-  points: 100,
-  duration: 60,
+  points: Number(process.env.API_RATE_LIMIT_POINTS) || 100,
+  duration: Number(process.env.API_RATE_LIMIT_DURATION) || 60,
 });
 
 // Request ID middleware - must be first to ensure request ID is available for all downstream middleware
@@ -73,10 +75,11 @@ app.use(requestContextMiddleware);
 // General API rate limiting
 app.use(async (req, res, next) => {
   try {
-    await apiLimiter.consume(req.ip);
+    await apiLimiter.consume(req.ip ?? "unknown");
     next();
   } catch (rejRes) {
-    res.set("Retry-After", String(Math.ceil(rejRes.msBeforeNext / 1000)));
+    const rateLimitRes = rejRes as { msBeforeNext: number };
+    res.set("Retry-After", String(Math.ceil(rateLimitRes.msBeforeNext / 1000)));
     res.status(429).json({ error: "Too many requests" });
   }
 });
@@ -102,23 +105,25 @@ app.get("/health", (req, res, next) => {
   // In production, only allow from internal IPs or load balancer
   if (process.env.NODE_ENV === "production") {
     const internalIps = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
-    const forwardedFor = req.headers["x-forwarded-for"]?.split(",")[0]?.trim();
-    const clientIp = forwardedFor || req.ip;
+    const forwardedFor = req.headers["x-forwarded-for"];
+    const firstForwarded = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(",")[0]?.trim();
+    const clientIp = firstForwarded || req.ip;
     
-    if (!internalIps.includes(clientIp)) {
+    if (!clientIp || !internalIps.includes(clientIp)) {
       return res.status(403).json({ error: "Forbidden" });
     }
   }
-  healthCheck(req, res, next);
+  healthCheck(req, res);
 });
 
 // Login-specific rate limiting
 app.use("/auth/login", async (req, res, next) => {
   try {
-    await loginLimiter.consume(req.ip);
+    await loginLimiter.consume(req.ip ?? "unknown");
     next();
   } catch (rejRes) {
-    res.set("Retry-After", String(Math.ceil(rejRes.msBeforeNext / 1000)));
+    const rateLimitRes = rejRes as { msBeforeNext: number };
+    res.set("Retry-After", String(Math.ceil(rateLimitRes.msBeforeNext / 1000)));
     res.status(429).json({ error: "Too many login attempts. Please try again later." });
   }
 });

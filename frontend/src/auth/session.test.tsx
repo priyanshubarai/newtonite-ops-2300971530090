@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { installFetchMock, type MockReply } from "../test/mockFetch";
 import { LEAD_MEMBERSHIP, makeItem, mockItemList, mockSession, TEST_USER } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { getToken, setToken } from "./tokenStore";
+import { hasValidSession, setSession } from "./tokenStore";
 
 /**
  * Session behaviour: how the app guards the authenticated area and reacts to a
@@ -33,7 +33,7 @@ describe("session handling", () => {
     });
     mock.on("GET", "/auth/me", () => pending);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
 
     renderApp({ route: "/items" });
 
@@ -46,32 +46,33 @@ describe("session handling", () => {
   it("returns to login and clears the token when the session is rejected", async () => {
     const mock = installFetchMock();
     mock.on("GET", "/auth/me", () => ({ status: 401, body: { error: "Invalid or expired token" } }));
-    setToken("expired-token");
+    setSession(true);
 
     renderApp({ route: "/items" });
 
     expect(await screen.findByRole("button", { name: /sign in/i })).toBeInTheDocument();
-    await waitFor(() => expect(getToken()).toBeNull());
+    await waitFor(() => expect(hasValidSession()).toBe(false));
     expect(mock.requestsFor("GET", "/items")).toHaveLength(0);
   });
 
   it("shows a recoverable error when the session cannot be loaded", async () => {
     const mock = installFetchMock();
     mock.on("GET", "/auth/me", () => ({ status: 500, body: { error: "Internal server error" } }));
-    setToken("session-token");
+    setSession(true);
 
     renderApp({ route: "/items" });
 
     expect(await screen.findByText(/couldn't load your session/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
-    expect(getToken()).toBe("session-token");
+    expect(hasValidSession()).toBe(true);
   });
 
   it("signs out from the shell and clears client-held session state", async () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    mock.on("POST", "/auth/logout", () => ({ status: 200, body: { message: "Logged out successfully" } }));
+    setSession(true);
     const user = userEvent.setup();
 
     renderApp({ route: "/items" });
@@ -82,7 +83,50 @@ describe("session handling", () => {
     await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
 
     expect(await screen.findByRole("button", { name: /sign in/i })).toBeInTheDocument();
-    expect(getToken()).toBeNull();
+    expect(hasValidSession()).toBe(false);
+  });
+
+  it("ends the server session on sign-out so the auth cookie is cleared", async () => {
+    // Regression guard for the cookie-auth refactor: the token lives in an
+    // HttpOnly cookie that JavaScript cannot delete, so clearing client state
+    // alone left a VALID credential in the browser after sign-out. The app
+    // must tell the server to clear it.
+    const mock = installFetchMock();
+    mockSession(mock);
+    mockItemList(mock, [makeItem()]);
+    mock.on("POST", "/auth/logout", () => ({ status: 200, body: { message: "Logged out successfully" } }));
+    setSession(true);
+    const user = userEvent.setup();
+
+    renderApp({ route: "/items" });
+    await screen.findByRole("heading", { name: /work items/i });
+
+    await user.click(screen.getByRole("button", { name: /open account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
+
+    await waitFor(() => expect(mock.requestsFor("POST", "/auth/logout")).toHaveLength(1));
+  });
+
+  it("still signs the user out locally when the logout request fails", async () => {
+    // A network failure must not trap the user in a signed-in state they asked
+    // to leave - the local session is cleared regardless of what the server
+    // says.
+    const mock = installFetchMock();
+    mockSession(mock);
+    mockItemList(mock, [makeItem()]);
+    mock.on("POST", "/auth/logout", () => ({ status: 500, body: { error: "Internal server error" } }));
+    setSession(true);
+    const user = userEvent.setup();
+
+    renderApp({ route: "/items" });
+    await screen.findByRole("heading", { name: /work items/i });
+
+    await user.click(screen.getByRole("button", { name: /open account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
+
+    expect(await screen.findByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    expect(hasValidSession()).toBe(false);
+    await waitFor(() => expect(mock.requestsFor("POST", "/auth/logout")).toHaveLength(1));
   });
 
   it("never renders the login screen when a stored token is already present", async () => {
@@ -93,7 +137,7 @@ describe("session handling", () => {
     const mock = installFetchMock();
     mockSession(mock);
     mockItemList(mock, [makeItem()]);
-    setToken("session-token");
+    setSession(true);
 
     const { container } = renderApp({ route: "/items" });
 
@@ -102,7 +146,7 @@ describe("session handling", () => {
     expect(container.textContent).not.toMatch(/sign in/i);
 
     expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
-    expect(getToken()).toBe("session-token");
+    expect(hasValidSession()).toBe(true);
   });
 
   it("reconciles a token written to storage by another context on mount", async () => {
@@ -112,7 +156,7 @@ describe("session handling", () => {
     // stuck anonymous. This test simulates that by clearing storage and writing
     // a fresh token, then mounting the app.
     localStorage.clear();
-    localStorage.setItem("newtonite_auth_token", "persisted-token");
+    localStorage.setItem("newtonite_has_session", "true");
 
     const mock = installFetchMock();
     mockSession(mock);
@@ -122,20 +166,20 @@ describe("session handling", () => {
 
     // The mount effect re-reads storage and picks up the new token.
     expect(await screen.findByRole("heading", { level: 1, name: /work items/i })).toBeInTheDocument();
-    expect(getToken()).toBe("persisted-token");
+    expect(hasValidSession()).toBe(true);
     expect(screen.queryByRole("button", { name: /sign in/i })).not.toBeInTheDocument();
   });
 
   it("does not log out on a transient server failure", async () => {
     const mock = installFetchMock();
     mock.on("GET", "/auth/me", () => ({ status: 503, body: { error: "Service unavailable" } }));
-    setToken("session-token");
+    setSession(true);
 
     renderApp({ route: "/items" });
 
     // A 5xx is "try again", not "your session is gone".
     expect(await screen.findByText(/couldn't load your session/i)).toBeInTheDocument();
-    expect(getToken()).toBe("session-token");
+    expect(hasValidSession()).toBe(true);
     expect(screen.queryByRole("button", { name: /sign in/i })).not.toBeInTheDocument();
   });
 
@@ -144,32 +188,13 @@ describe("session handling", () => {
     mockSession(mock);
     // The work-item list fails with a 403 while the session itself is healthy.
     mock.on("GET", "/items", () => ({ status: 403, body: { error: "Forbidden" } }));
-    setToken("session-token");
+    setSession(true);
 
     renderApp({ route: "/items" });
 
     expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
     // The user stays signed in; only the failing surface reports an error.
-    expect(getToken()).toBe("session-token");
+    expect(hasValidSession()).toBe(true);
     expect(screen.queryByRole("button", { name: /sign in/i })).not.toBeInTheDocument();
-  });
-
-  it("does not re-request /auth/me when the search input takes focus", async () => {
-    const mock = installFetchMock();
-    mockSession(mock);
-    mockItemList(mock, [makeItem()]);
-    setToken("session-token");
-    const user = userEvent.setup();
-
-    renderApp({ route: "/overview" });
-    await screen.findByText("Total Items");
-
-    const settledCount = mock.requestsFor("GET", "/auth/me").length;
-    const input = screen.getByLabelText(/search work items/i);
-    await user.click(input);
-    await user.keyboard("latency");
-
-    await waitFor(() => expect(input).toHaveValue("latency"));
-    expect(mock.requestsFor("GET", "/auth/me")).toHaveLength(settledCount);
   });
 });

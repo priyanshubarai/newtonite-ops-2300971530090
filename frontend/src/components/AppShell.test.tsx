@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { installFetchMock } from "../test/mockFetch";
 import { mockSession, mockItemList, makeItem, TEST_USER, LEAD_MEMBERSHIP } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 /**
  * AppShell navigation: accessible labels, keyboard interaction, responsive
@@ -12,7 +12,7 @@ import { setToken } from "../auth/tokenStore";
  */
 describe("AppShell navigation", () => {
   beforeEach(() => {
-    setToken("session-token");
+    setSession(true);
   });
 
   it("renders the sidebar navigation with accessible labels", async () => {

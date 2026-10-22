@@ -1,7 +1,7 @@
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { clearToken } from "../auth/tokenStore";
+import { clearSession, resetTokenStore } from "../auth/tokenStore";
 
 /**
  * Global test setup: jest-dom matchers, DOM cleanup between tests, and a reset
@@ -9,8 +9,12 @@ import { clearToken } from "../auth/tokenStore";
  * into the next. `tokenStore` hydrates from localStorage at module load, so
  * clearing only the in-memory value is no longer sufficient.
  */
+beforeEach(() => {
+  resetTokenStore();
+});
+
 afterEach(() => {
   cleanup();
-  clearToken();
+  clearSession();
   localStorage.clear();
 });

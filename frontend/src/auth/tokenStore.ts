@@ -57,6 +57,17 @@ export function clearSession(): void {
   setSession(false);
 }
 
+/** Reset the token store for testing: clear in-memory state and localStorage. */
+export function resetTokenStore(): void {
+  hasSession = false;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Ignore localStorage errors
+  }
+  for (const listener of listeners) listener();
+}
+
 /** Subscribe to session changes. Returns an unsubscribe function. */
 export function subscribeToken(listener: () => void): () => void {
   listeners.add(listener);

@@ -53,11 +53,11 @@ interface Fixture {
 }
 
 let fx: Fixture;
-const tokens: Record<string, string> = {};
+const cookies: Record<string, string> = {};
 const emails: Record<string, string> = {};
 
-function authed(token: string) {
-  return { Authorization: `Bearer ${token}` };
+function authed(cookie: string) {
+  return { Cookie: cookie };
 }
 
 async function makeUser(key: string, name: string): Promise<string> {
@@ -73,7 +73,11 @@ async function login(key: string): Promise<string> {
   if (res.status !== 200) {
     throw new Error(`login failed for ${key}: ${res.status} ${JSON.stringify(res.body)}`);
   }
-  return res.body.token as string;
+  const cookie = res.headers["set-cookie"]?.[0] || "";
+  if (!cookie) {
+    throw new Error(`no auth_token cookie for ${key}`);
+  }
+  return cookie;
 }
 
 let itemSeq = 0;
@@ -152,7 +156,7 @@ beforeAll(async () => {
     "promotable",
     "outsider",
   ]) {
-    tokens[key] = await login(key);
+    cookies[key] = await login(key);
   }
 });
 
@@ -190,7 +194,7 @@ describe("API error handling and response hygiene", () => {
   it("rejects an oversized JSON body with 413, not 500 (regression)", async () => {
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .set("Content-Type", "application/json")
       .send({ title: "x".repeat(200_000), type: "TASK", priority: "LOW", teamId: fx.teamA });
 
@@ -216,19 +220,19 @@ describe("API error handling and response hygiene", () => {
       (
         await request(app)
           .post("/items")
-          .set(authed(tokens.viewerA))
+          .set(authed(cookies.viewerA))
           .send({ title: "x", type: "TASK", priority: "LOW", teamId: fx.teamA })
       ).text,
     );
     // 404 cross-team / non-existent
-    samples.push((await request(app).get(`/items/${await freshItem()}`).set(authed(tokens.outsider))).text);
+    samples.push((await request(app).get(`/items/${await freshItem()}`).set(authed(cookies.outsider))).text);
     // 409 stale version
     const id = await freshItem();
     samples.push(
       (
         await request(app)
           .patch(`/items/${id}`)
-          .set(authed(tokens.memberA))
+          .set(authed(cookies.memberA))
           .send({ title: "y", expectedVersion: 999 })
       ).text,
     );
@@ -320,25 +324,25 @@ describe("live membership and role changes are honoured by the API", () => {
     const id = await freshItem();
 
     // MEMBER can view, edit, and claim.
-    expect((await request(app).get(`/items/${id}`).set(authed(tokens.changeable))).status).toBe(200);
+    expect((await request(app).get(`/items/${id}`).set(authed(cookies.changeable))).status).toBe(200);
 
     await removeMembership(fx.changeable, fx.teamA);
 
-    expect((await request(app).get(`/items/${id}`).set(authed(tokens.changeable))).status).toBe(404);
-    expect((await request(app).post(`/items/${id}/claim`).set(authed(tokens.changeable)).send({})).status).toBe(404);
+    expect((await request(app).get(`/items/${id}`).set(authed(cookies.changeable))).status).toBe(404);
+    expect((await request(app).post(`/items/${id}/claim`).set(authed(cookies.changeable)).send({})).status).toBe(404);
     expect(
       (
         await request(app)
           .post("/items")
-          .set(authed(tokens.changeable))
+          .set(authed(cookies.changeable))
           .send({ title: "revoked", type: "TASK", priority: "LOW", teamId: fx.teamA })
       ).status,
     ).toBe(404);
 
     // The token itself is unchanged; only the membership was revoked.
     await addMembership(fx.changeable, fx.teamA, "MEMBER");
-    expect((await request(app).get(`/items/${id}`).set(authed(tokens.changeable))).status).toBe(200);
-    expect((await request(app).post(`/items/${id}/claim`).set(authed(tokens.changeable)).send({})).status).toBe(200);
+    expect((await request(app).get(`/items/${id}`).set(authed(cookies.changeable))).status).toBe(200);
+    expect((await request(app).post(`/items/${id}/claim`).set(authed(cookies.changeable)).send({})).status).toBe(200);
   });
 
   it("promoting a VIEWER to MEMBER grants ordinary work rights, and demoting revokes them", async () => {
@@ -348,11 +352,11 @@ describe("live membership and role changes are honoured by the API", () => {
       (
         await request(app)
           .post("/items")
-          .set(authed(tokens.promotable))
+          .set(authed(cookies.promotable))
           .send({ title: "v", type: "TASK", priority: "LOW", teamId: fx.teamA })
       ).status,
     ).toBe(403);
-    expect((await request(app).post(`/items/${beforeItem}/claim`).set(authed(tokens.promotable)).send({})).status).toBe(403);
+    expect((await request(app).post(`/items/${beforeItem}/claim`).set(authed(cookies.promotable)).send({})).status).toBe(403);
 
     // Promote VIEWER -> MEMBER.
     await removeMembership(fx.promotable, fx.teamA);
@@ -360,17 +364,17 @@ describe("live membership and role changes are honoured by the API", () => {
 
     const created = await request(app)
       .post("/items")
-      .set(authed(tokens.promotable))
+      .set(authed(cookies.promotable))
       .send({ title: "promoted", type: "TASK", priority: "LOW", teamId: fx.teamA });
     expect(created.status).toBe(201);
     const claimable = await freshItem();
-    expect((await request(app).post(`/items/${claimable}/claim`).set(authed(tokens.promotable)).send({})).status).toBe(200);
+    expect((await request(app).post(`/items/${claimable}/claim`).set(authed(cookies.promotable)).send({})).status).toBe(200);
 
     // Demote back to VIEWER -> claim denied again (403, still a member).
     await removeMembership(fx.promotable, fx.teamA);
     await addMembership(fx.promotable, fx.teamA, "VIEWER");
     const another = await freshItem();
-    expect((await request(app).post(`/items/${another}/claim`).set(authed(tokens.promotable)).send({})).status).toBe(403);
+    expect((await request(app).post(`/items/${another}/claim`).set(authed(cookies.promotable)).send({})).status).toBe(403);
   });
 });
 
@@ -381,7 +385,7 @@ describe("cross-team isolation", () => {
     const itemB = await freshItem({ teamId: fx.teamB });
 
     // adminA is ADMIN in team A; leadA is LEAD in team A.
-    for (const token of [tokens.adminA, tokens.leadA]) {
+    for (const token of [cookies.adminA, cookies.leadA]) {
       expect((await request(app).get(`/items/${itemB}`).set(authed(token))).status).toBe(404);
       expect(
         (await request(app).patch(`/items/${itemB}`).set(authed(token)).send({ title: "x", expectedVersion: 1 })).status,
@@ -398,7 +402,7 @@ describe("cross-team isolation", () => {
     }
 
     // Untouched by any of the above.
-    const itemB2 = await request(app).get(`/items/${itemB}`).set(authed(tokens.leadB));
+    const itemB2 = await request(app).get(`/items/${itemB}`).set(authed(cookies.leadB));
     expect(itemB2.status).toBe(200);
     expect(itemB2.body.version).toBe(1);
     expect(itemB2.body.status).toBe("OPEN");
@@ -409,11 +413,11 @@ describe("cross-team isolation", () => {
     await freshItem();
     await freshItem({ teamId: fx.teamB });
 
-    const mine = await request(app).get("/items?pageSize=100").set(authed(tokens.memberA));
+    const mine = await request(app).get("/items?pageSize=100").set(authed(cookies.memberA));
     expect(mine.status).toBe(200);
     expect(mine.body.items.every((i: WorkItemRow) => i.teamId === fx.teamA)).toBe(true);
 
-    const foreignFilter = await request(app).get(`/items?teamId=${fx.teamB}`).set(authed(tokens.memberA));
+    const foreignFilter = await request(app).get(`/items?teamId=${fx.teamB}`).set(authed(cookies.memberA));
     expect(foreignFilter.status).toBe(200);
     expect(foreignFilter.body.items).toEqual([]);
     expect(foreignFilter.body.pagination.total).toBe(0);
@@ -425,20 +429,20 @@ describe("cross-team isolation", () => {
 describe("pagination contract", () => {
   it("accepts 1..100 and rejects 0, negative, over-cap, fractional, and non-numeric values with 400", async () => {
     for (const ok of ["1", "20", "100"]) {
-      expect((await request(app).get(`/items?pageSize=${ok}`).set(authed(tokens.memberA))).status, ok).toBe(200);
+      expect((await request(app).get(`/items?pageSize=${ok}`).set(authed(cookies.memberA))).status, ok).toBe(200);
     }
     for (const bad of ["0", "-1", "101", "1.5", "abc", "1e3"]) {
-      expect((await request(app).get(`/items?pageSize=${bad}`).set(authed(tokens.memberA))).status, bad).toBe(400);
+      expect((await request(app).get(`/items?pageSize=${bad}`).set(authed(cookies.memberA))).status, bad).toBe(400);
     }
   });
 
   it("rejects an out-of-range page with 400 rather than overflowing the database (regression)", async () => {
     for (const badPage of ["99999999999999999999", "1e20", "1e17", "-1", "0", "1.5"]) {
-      const res = await request(app).get(`/items?page=${badPage}`).set(authed(tokens.memberA));
+      const res = await request(app).get(`/items?page=${badPage}`).set(authed(cookies.memberA));
       expect(res.status, `page=${badPage}`).toBe(400);
     }
     // A large-but-valid page is an empty 200, not an error.
-    const big = await request(app).get("/items?page=1000000&pageSize=100").set(authed(tokens.memberA));
+    const big = await request(app).get("/items?page=1000000&pageSize=100").set(authed(cookies.memberA));
     expect(big.status).toBe(200);
     expect(big.body.items).toEqual([]);
   });
@@ -461,18 +465,18 @@ describe("input validation", () => {
       { title: "x", status: "CLOSED", expectedVersion: 1 }, // protected
     ];
     for (const body of cases) {
-      const res = await request(app).patch(`/items/${id}`).set(authed(tokens.memberA)).send(body);
+      const res = await request(app).patch(`/items/${id}`).set(authed(cookies.memberA)).send(body);
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
     // None of the rejected patches mutated the row.
-    const after = await request(app).get(`/items/${id}`).set(authed(tokens.memberA));
+    const after = await request(app).get(`/items/${id}`).set(authed(cookies.memberA));
     expect(after.body.version).toBe(1);
   });
 
   it("rejects a malformed dueAt on create with 400", async () => {
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .send({ title: "bad due", type: "TASK", priority: "LOW", teamId: fx.teamA, dueAt: "yesterday" });
     expect(res.status).toBe(400);
   });
@@ -486,7 +490,7 @@ describe("idempotency guards", () => {
     const title = `Too-long key ${uniqueKey()}`;
     const res = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .set("Idempotency-Key", key)
       .send({ title, type: "TASK", priority: "LOW", teamId: fx.teamA });
 
@@ -501,7 +505,7 @@ describe("idempotency guards", () => {
     // Invalid body (bad enum) with the key -> 400, no record.
     const bad = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .set("Idempotency-Key", key)
       .send({ title: "bad", type: "BOGUS", priority: "LOW", teamId: fx.teamA });
     expect(bad.status).toBe(400);
@@ -510,7 +514,7 @@ describe("idempotency guards", () => {
     // The same key is still usable for a valid request.
     const ok = await request(app)
       .post("/items")
-      .set(authed(tokens.memberA))
+      .set(authed(cookies.memberA))
       .set("Idempotency-Key", key)
       .send({ title: "good after failure", type: "TASK", priority: "LOW", teamId: fx.teamA });
     expect(ok.status).toBe(201);

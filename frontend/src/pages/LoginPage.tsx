@@ -42,8 +42,8 @@ export function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: (credentials: { email: string; password: string }) =>
       login(credentials.email, credentials.password),
-    onSuccess: (data) => {
-      signIn(data.token);
+    onSuccess: () => {
+      signIn();
     },
     onError: (error) => {
       setFormError(

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe } from "../api/auth";
+import { fetchMe, logout } from "../api/auth";
 import { setUnauthorizedHandler } from "../api/client";
 import type { AuthUser, Membership } from "../api/types";
 import { clearSession, hasValidSession, initializeToken, setSession, subscribeToken } from "./tokenStore";
@@ -73,6 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(() => {
+    // End the SERVER session as well as the client-side one. The token lives in
+    // an HttpOnly cookie that JavaScript cannot delete, so without this call
+    // the credential would survive sign-out and stay valid server-side until
+    // it expired. The request is best-effort: the local session is cleared
+    // either way, and a failure to reach the server must not trap the user in
+    // a signed-in state they asked to leave.
+    void logout().catch(() => undefined);
     clearSession();
     queryClient.clear();
   }, [queryClient]);

@@ -1,5 +1,6 @@
 import express from "express";
 import request from "supertest";
+import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../config/env.js";
@@ -45,6 +46,7 @@ testRouter.post("/members/:teamId", requireAuth, requireTeamPermission("manage_m
 
 const testApp = express();
 testApp.use(express.json());
+testApp.use(cookieParser());
 testApp.use("/auth", authRouter); // reuse the real auth routes (login, /me)
 testApp.use("/t", testRouter);
 
@@ -62,15 +64,23 @@ interface Fixture {
 }
 
 let fx: Fixture;
-const tokens: Record<string, string> = {};
+const cookies: Record<string, string> = {};
 
-async function loginAs(email: string, password: string): Promise<{ status: number; body: any }> {
+async function loginAs(email: string, password: string): Promise<{ status: number; body: any; cookie: string }> {
   const res = await request(testApp).post("/auth/login").send({ email, password });
-  return { status: res.status, body: res.body };
+  const cookie = res.headers["set-cookie"]?.[0] || "";
+  return { status: res.status, body: res.body, cookie };
 }
 
-function authed(token: string) {
-  return { Authorization: `Bearer ${token}` };
+function authed(cookie: string) {
+  return { Cookie: cookie };
+}
+
+const fxEmails: Record<string, string> = {};
+
+async function emailFor(userId: string): Promise<string | null> {
+  const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
+  return rows[0]?.email ?? null;
 }
 
 beforeAll(async () => {
@@ -93,7 +103,7 @@ beforeAll(async () => {
 
   fx = { teamA, teamB, viewer, member, lead, admin, outsider, inactive };
 
-  // Obtain real tokens through the login endpoint.
+  // Obtain real cookies through the login endpoint.
   const emails: Record<string, string> = {
     viewer: (await emailFor(viewer))!,
     member: (await emailFor(member))!,
@@ -103,22 +113,15 @@ beforeAll(async () => {
     inactive: (await emailFor(inactive))!,
   };
   for (const key of ["viewer", "member", "lead", "admin", "outsider"]) {
-    const { status, body } = await loginAs(emails[key], TEST_PASSWORD);
+    const { status, body, cookie } = await loginAs(emails[key], TEST_PASSWORD);
     if (status !== 200) {
-      throw new Error(`Failed to obtain token for ${key}: ${status} ${JSON.stringify(body)}`);
+      throw new Error(`Failed to obtain cookie for ${key}: ${status} ${JSON.stringify(body)}`);
     }
-    tokens[key] = body.token;
+    cookies[key] = cookie;
   }
   // Expose emails for login-failure tests.
   Object.assign(fxEmails, emails);
 });
-
-const fxEmails: Record<string, string> = {};
-
-async function emailFor(userId: string): Promise<string | null> {
-  const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
-  return rows[0]?.email ?? null;
-}
 
 afterAll(async () => {
   await cleanupFixture({
@@ -130,9 +133,9 @@ afterAll(async () => {
 
 describe("POST /auth/login", () => {
   it("returns a token and safe user profile for correct credentials", async () => {
-    const { status, body } = await loginAs(fxEmails.viewer, TEST_PASSWORD);
+    const { status, body, cookie } = await loginAs(fxEmails.viewer, TEST_PASSWORD);
     expect(status).toBe(200);
-    expect(typeof body.token).toBe("string");
+    expect(cookie).toContain("auth_token=");
     expect(body.tokenType).toBe("Bearer");
     expect(body.user).toMatchObject({ email: fxEmails.viewer });
     expect(body.user.passwordHash).toBeUndefined();
@@ -165,8 +168,47 @@ describe("POST /auth/login", () => {
   });
 
   it("normalizes email case before lookup", async () => {
-    const { status } = await loginAs(fxEmails.member.toUpperCase(), TEST_PASSWORD);
+    const { status, cookie } = await loginAs(fxEmails.member.toUpperCase(), TEST_PASSWORD);
     expect(status).toBe(200);
+    expect(cookie).toContain("auth_token=");
+  });
+});
+
+describe("POST /auth/logout", () => {
+  it("clears the auth cookie so the browser deletes it", async () => {
+    // Sign-out must invalidate the SERVER session, not just the client's view
+    // of it: the token lives in an HttpOnly cookie, so clearing it is the only
+    // way the credential actually leaves the browser. The clearing cookie must
+    // repeat the attributes used when the cookie was set, otherwise the
+    // browser keeps the original cookie.
+    const { status, cookie } = await loginAs(fxEmails.viewer, TEST_PASSWORD);
+    expect(status).toBe(200);
+    expect(cookie).toContain("auth_token=");
+
+    const res = await request(testApp).post("/auth/logout");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ message: "Logged out successfully" });
+
+    const setCookie = (res.headers["set-cookie"] ?? []) as unknown as string[];
+    expect(Array.isArray(setCookie)).toBe(true);
+    expect(setCookie.length).toBeGreaterThan(0);
+
+    const cleared = setCookie.find((value) => value.startsWith("auth_token="));
+    expect(cleared).toBeDefined();
+    // An empty value plus a past expiry is how a cookie is deleted.
+    expect(cleared).toMatch(/^auth_token=;/);
+    expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/i);
+    // The same attributes as the original cookie, so the browser matches and
+    // replaces it rather than storing a second, differently-scoped cookie.
+    expect(cleared).toMatch(/HttpOnly/i);
+    expect(cleared).toMatch(/SameSite=Strict/i);
+    expect(cleared).toMatch(/Path=\//i);
+  });
+
+  it("succeeds without a session so sign-out is never blocked", async () => {
+    const res = await request(testApp).post("/auth/logout");
+    expect(res.status).toBe(200);
   });
 });
 
@@ -174,7 +216,7 @@ describe("GET /me", () => {
   it("returns the user and memberships without exposing the password hash", async () => {
     const res = await request(testApp)
       .get("/auth/me")
-      .set(authed(tokens.lead));
+      .set(authed(cookies.lead));
     expect(res.status).toBe(200);
     expect(res.body.user.email).toBe(fxEmails.lead);
     expect(res.body.user.passwordHash).toBeUndefined();
@@ -198,7 +240,7 @@ describe("GET /me", () => {
   it("rejects an invalid token", async () => {
     const res = await request(testApp)
       .get("/auth/me")
-      .set(authed("not.a.validtoken"));
+      .set({ Cookie: "auth_token=not.a.validtoken" });
     expect(res.status).toBe(401);
   });
 
@@ -209,7 +251,7 @@ describe("GET /me", () => {
       issuer: "newtonite",
       audience: "newtonite-api",
     });
-    const res = await request(testApp).get("/auth/me").set(authed(forged));
+    const res = await request(testApp).get("/auth/me").set({ Cookie: `auth_token=${forged}` });
     expect(res.status).toBe(401);
   });
 
@@ -220,7 +262,7 @@ describe("GET /me", () => {
       issuer: "newtonite",
       audience: "newtonite-api",
     });
-    const res = await request(testApp).get("/auth/me").set(authed(expired));
+    const res = await request(testApp).get("/auth/me").set({ Cookie: `auth_token=${expired}` });
     expect(res.status).toBe(401);
   });
 
@@ -231,43 +273,43 @@ describe("GET /me", () => {
       issuer: "newtonite",
       audience: "newtonite-api",
     });
-    const res = await request(testApp).get("/auth/me").set(authed(ghost));
+    const res = await request(testApp).get("/auth/me").set({ Cookie: `auth_token=${ghost}` });
     expect(res.status).toBe(401);
   });
 });
 
 describe("team-scoped authorization (requireTeamPermission)", () => {
   it("VIEWER can view but cannot create, approve, or manage membership", async () => {
-    const t = tokens.viewer;
-    expect((await request(testApp).get(`/t/view/${fx.teamA}`).set(authed(t))).status).toBe(200);
-    expect((await request(testApp).post(`/t/item/${fx.teamA}`).set(authed(t))).status).toBe(403);
-    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(t))).status).toBe(403);
-    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(t))).status).toBe(403);
+    const c = cookies.viewer;
+    expect((await request(testApp).get(`/t/view/${fx.teamA}`).set(authed(c))).status).toBe(200);
+    expect((await request(testApp).post(`/t/item/${fx.teamA}`).set(authed(c))).status).toBe(403);
+    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(c))).status).toBe(403);
+    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(c))).status).toBe(403);
   });
 
   it("MEMBER can create but cannot approve or manage membership", async () => {
-    const t = tokens.member;
-    expect((await request(testApp).post(`/t/item/${fx.teamA}`).set(authed(t))).status).toBe(201);
-    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(t))).status).toBe(403);
-    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(t))).status).toBe(403);
+    const c = cookies.member;
+    expect((await request(testApp).post(`/t/item/${fx.teamA}`).set(authed(c))).status).toBe(201);
+    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(c))).status).toBe(403);
+    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(c))).status).toBe(403);
   });
 
   it("LEAD can approve within their team but cannot manage membership", async () => {
-    const t = tokens.lead;
-    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(t))).status).toBe(200);
-    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(t))).status).toBe(403);
+    const c = cookies.lead;
+    expect((await request(testApp).post(`/t/approve/${fx.teamA}`).set(authed(c))).status).toBe(200);
+    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(c))).status).toBe(403);
   });
 
   it("ADMIN can manage membership within their team", async () => {
-    const t = tokens.admin;
-    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(t))).status).toBe(200);
+    const c = cookies.admin;
+    expect((await request(testApp).post(`/t/members/${fx.teamA}`).set(authed(c))).status).toBe(200);
   });
 
   it("a role in Team A grants no permission in Team B", async () => {
     // Admin is ADMIN in A but has no membership in B -> not found (404), not 200.
     const res = await request(testApp)
       .post(`/t/members/${fx.teamB}`)
-      .set(authed(tokens.admin));
+      .set(authed(cookies.admin));
     expect(res.status).toBe(404);
   });
 
@@ -320,10 +362,11 @@ describe("authorizeTeamAction reflects live membership changes", () => {
 
 describe("seeded demo account", () => {
   it("can log in with the documented demo password", async () => {
-    const { status, body } = await loginAs("avery@newtonite.dev", DEMO_PASSWORD);
+    const { status, body, cookie } = await loginAs("avery@newtonite.dev", DEMO_PASSWORD);
     // If the demo seed is present this is 200; tolerate absence but never fail open.
     if (status === 200) {
-      expect(typeof body.token).toBe("string");
+      expect(cookie).toContain("auth_token=");
+      expect(body.tokenType).toBe("Bearer");
     } else {
       expect(status).toBe(401);
     }

@@ -10,7 +10,7 @@ import {
   mockSession,
 } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 function lastListRequest(mock: ReturnType<typeof installFetchMock>) {
   const requests = mock.requestsFor("GET", "/items");
@@ -18,7 +18,7 @@ function lastListRequest(mock: ReturnType<typeof installFetchMock>) {
 }
 
 async function renderDashboard(mock: ReturnType<typeof installFetchMock>) {
-  setToken("session-token");
+  setSession(true);
   mockSession(mock);
   renderApp({ route: "/items" });
   await screen.findByRole("heading", { name: /work items/i });
@@ -152,7 +152,7 @@ describe("ItemsPage", () => {
   it("hides the create action for a viewer", async () => {
     const mock = installFetchMock();
     mockItemList(mock, []);
-    setToken("session-token");
+    setSession(true);
     mockSession(mock, { memberships: [VIEWER_MEMBERSHIP] });
 
     renderApp({ route: "/items" });

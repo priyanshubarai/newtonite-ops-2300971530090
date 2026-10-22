@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { installFetchMock } from "../test/mockFetch";
+import { installFetchMock, type FetchMock } from "../test/mockFetch";
 import { mockItemList, mockSession, makeItem, TEST_USER } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { getToken } from "../auth/tokenStore";
+import { hasValidSession } from "../auth/tokenStore";
 import {
   DEMO_ACCOUNTS,
   DEV_DEMO_PASSWORD,
@@ -20,18 +20,21 @@ import {
  */
 
 function passwordInput() {
-  // Exact match: the show/hide control is labelled "Show password".
-  return screen.getByLabelText(/^password$/i);
+  return screen.getByLabelText(/^Password$/i);
 }
 
 function emailInput() {
-  return screen.getByLabelText(/^email$/i);
+  return screen.getByLabelText(/^Email$/i);
+}
+
+function mockUnauthSession(fetchMock: FetchMock): void {
+  fetchMock.on("GET", "/auth/me", () => ({ status: 401, body: { error: "Invalid or expired token" } }));
 }
 
 describe("LoginPage", () => {
   it("renders a deliberately sized auth card with a single readable title", () => {
     const mock = installFetchMock();
-    mockSession(mock);
+    mockUnauthSession(mock);
 
     renderApp({ route: "/login" });
 
@@ -39,20 +42,18 @@ describe("LoginPage", () => {
       name: "Newtonite Operations",
       level: 1,
     });
-    // Regression guard: the display scale (up to 72px) shredded this title
-    // inside the card and must not be reused here.
     expect(heading).not.toHaveClass("text-display");
     expect(heading.closest(".auth-card")).toBeInTheDocument();
   });
 
   it("blocks submission and reports missing fields", async () => {
     const mock = installFetchMock();
-    mockSession(mock);
+    mockUnauthSession(mock);
     const user = userEvent.setup();
 
     renderApp({ route: "/login" });
     await user.clear(passwordInput());
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     expect(await screen.findByText("Enter your email address.")).toBeInTheDocument();
     expect(screen.getByText("Enter your password.")).toBeInTheDocument();
@@ -61,7 +62,7 @@ describe("LoginPage", () => {
 
   it("associates labels with their controls", () => {
     const mock = installFetchMock();
-    mockSession(mock);
+    mockUnauthSession(mock);
 
     renderApp({ route: "/login" });
 
@@ -72,18 +73,16 @@ describe("LoginPage", () => {
 
   it("offers exactly the maintained demo accounts", () => {
     const mock = installFetchMock();
-    mockSession(mock);
+    mockUnauthSession(mock);
 
     renderApp({ route: "/login" });
 
     const select = screen.getByLabelText(/demo account/i);
     const options = within(select).getAllByRole("option");
-    // First option is the placeholder, then one option per configured account.
     expect(options[0]).toHaveValue("");
     expect(options.slice(1).map((option) => option.getAttribute("value"))).toEqual(
       DEMO_ACCOUNTS.map((account) => account.email),
     );
-    // No secrets belong in the option labels.
     for (const option of options) {
       expect(option.textContent ?? "").not.toContain(DEV_DEMO_PASSWORD);
     }
@@ -91,7 +90,7 @@ describe("LoginPage", () => {
 
   it("populates the email field and role preview when an account is selected", async () => {
     const mock = installFetchMock();
-    mockSession(mock);
+    mockUnauthSession(mock);
     const user = userEvent.setup();
 
     renderApp({ route: "/login" });
@@ -189,13 +188,13 @@ describe("LoginPage", () => {
     await user.type(emailInput(), "nobody@newtonite.dev");
     await user.clear(passwordInput());
     await user.type(passwordInput(), "wrong-password");
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Invalid email or password.");
     // Still on the login screen, and no token was stored.
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
-    expect(getToken()).toBeNull();
+    expect(screen.getByRole("button", { name: /Sign in/i })).toBeInTheDocument();
+    expect(hasValidSession()).toBe(false);
     // An ordinary failure must not wipe the tester's input.
     expect(passwordInput()).toHaveValue("wrong-password");
   });
@@ -211,12 +210,12 @@ describe("LoginPage", () => {
     await user.type(emailInput(), TEST_USER.email);
     await user.clear(passwordInput());
     await user.type(passwordInput(), "any-password");
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("We couldn't reach the server. Check your connection and try again.");
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
-    expect(getToken()).toBeNull();
+    expect(screen.getByRole("button", { name: /Sign in/i })).toBeInTheDocument();
+    expect(hasValidSession()).toBe(false);
   });
 
   it("shows a server error message for non-401 server failures", async () => {
@@ -232,12 +231,12 @@ describe("LoginPage", () => {
     await user.type(emailInput(), TEST_USER.email);
     await user.clear(passwordInput());
     await user.type(passwordInput(), "any-password");
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Internal server error");
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
-    expect(getToken()).toBeNull();
+    expect(screen.getByRole("button", { name: /Sign in/i })).toBeInTheDocument();
+    expect(hasValidSession()).toBe(false);
   });
 
   it("returns to the originally requested page after successful login", async () => {
@@ -258,7 +257,7 @@ describe("LoginPage", () => {
     await user.type(emailInput(), TEST_USER.email);
     await user.clear(passwordInput());
     await user.type(passwordInput(), "correct-horse-battery");
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
   });
@@ -279,7 +278,7 @@ describe("LoginPage", () => {
     await user.clear(passwordInput());
     await user.type(passwordInput(), "correct-horse-battery");
 
-    const submitButton = screen.getByRole("button", { name: /sign in/i });
+    const submitButton = screen.getByRole("button", { name: /Sign in/i });
     await user.click(submitButton);
 
     // Button should be disabled and show loading text
@@ -313,10 +312,10 @@ describe("LoginPage", () => {
     await user.type(emailInput(), TEST_USER.email);
     await user.clear(passwordInput());
     await user.type(passwordInput(), "correct-horse-battery");
-    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    await user.click(screen.getByRole("button", { name: /Sign in/i }));
 
     expect(await screen.findByRole("heading", { name: /work items/i })).toBeInTheDocument();
-    expect(getToken()).toBe("session-token");
+    expect(hasValidSession()).toBe(true);
   });
 
   it("sends the selected email and password through the existing login contract", async () => {
@@ -331,7 +330,7 @@ describe("LoginPage", () => {
 
     renderApp({ route: "/login" });
     await user.selectOptions(screen.getByLabelText(/demo account/i), "avery@newtonite.dev");
-    const submit = screen.getByRole("button", { name: /sign in/i });
+    const submit = screen.getByRole("button", { name: /Sign in/i });
     expect(submit).toBeEnabled();
     await user.click(submit);
 

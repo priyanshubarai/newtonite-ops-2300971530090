@@ -4,12 +4,26 @@ import userEvent from "@testing-library/user-event";
 import { installFetchMock, type MockReply } from "../test/mockFetch";
 import { LEAD_MEMBERSHIP, TEAM_PAYMENTS, TEST_USER, makeItem, mockSession } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
-import { setToken } from "../auth/tokenStore";
+import { setSession } from "../auth/tokenStore";
 
 const ITEM_PATH = /^\/items\/[0-9a-f-]{36}$/;
 
+/** Helper to find Sonner toasts which render in a portal on document.body */
+function findToast(role: "alert" | "status", name: RegExp) {
+  return waitFor(() => {
+    const toasts = document.body.querySelectorAll('[data-sonner-toast]');
+    for (const toast of toasts) {
+      const roleElement = toast.querySelector(`[role="${role}"]`) || toast;
+      if (name.test(roleElement.textContent || "")) {
+        return roleElement;
+      }
+    }
+    throw new Error(`Toast with role "${role}" and name matching ${name} not found`);
+  });
+}
+
 async function renderCreatePage(mock: ReturnType<typeof installFetchMock>) {
-  setToken("session-token");
+  setSession(true);
   mockSession(mock);
   renderApp({ route: "/items/new" });
   await screen.findByRole("heading", { name: /new work item/i });
@@ -133,7 +147,7 @@ describe("ItemCreatePage", () => {
 
     await user.type(screen.getByLabelText(/title/i), "Retry me");
     await user.click(screen.getByRole("button", { name: /create work item/i }));
-    await screen.findByRole("alert");
+    await findToast("alert", /internal server error/i);
 
     await user.click(screen.getByRole("button", { name: /create work item/i }));
     await waitFor(() => expect(mock.requestsFor("POST", "/items")).toHaveLength(2));
@@ -150,7 +164,7 @@ describe("ItemCreatePage", () => {
 
     await user.type(screen.getByLabelText(/title/i), "First title");
     await user.click(screen.getByRole("button", { name: /create work item/i }));
-    await screen.findByRole("alert");
+    await findToast("alert", /internal server error/i);
 
     const title = screen.getByLabelText(/title/i);
     await user.clear(title);
@@ -164,7 +178,7 @@ describe("ItemCreatePage", () => {
 
   it("explains when the user has no role that permits creating items", async () => {
     const mock = installFetchMock();
-    setToken("session-token");
+    setSession(true);
     mockSession(mock, {
       memberships: [{ teamId: TEAM_PAYMENTS, teamName: "Payments", teamSlug: "payments", role: "VIEWER" }],
     });
