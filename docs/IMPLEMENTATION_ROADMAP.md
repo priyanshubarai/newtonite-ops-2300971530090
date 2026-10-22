@@ -11,6 +11,8 @@ This roadmap documents the nine approved phases in the specified order for imple
 ## Phase 1 — Project Foundation
 **Goal:** Inspect and preserve the existing repository. Establish the minimal TypeScript project structure, environment configuration, PostgreSQL connectivity, Drizzle configuration, migration tooling, health checks, and reproducible local setup.
 
+> **Status note (2026-10-22):** the Docker Compose item below was **not implemented**. No `docker-compose.yml` exists in the repository, the database is hosted on Neon, and this machine has no usable Docker engine. The unchecked boxes are accurate; the commands under *Verification Commands* describe the intended flow, not a verified one.
+
 ### Tasks
 - [ ] Inspect repository structure and Git status; preserve existing working tree
 - [ ] Initialize/organize monorepo structure for backend and frontend

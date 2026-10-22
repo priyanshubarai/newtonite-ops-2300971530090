@@ -106,7 +106,7 @@ See the [Assignment Checklist](docs/ASSIGNMENT_CHECKLIST.md) for detailed status
 ### Prerequisites
 - Node.js (LTS)
 - A Neon PostgreSQL database (connection string supplied by the developer)
-- Docker and Docker Compose (optional; no local PostgreSQL is required — see `docker-compose.yml`)
+- Docker and Docker Compose (optional; no local PostgreSQL is required). This repository does **not** include a `docker-compose.yml` — local development uses the hosted Neon database through `DATABASE_URL`.
 
 ### Environment Setup
 ```bash
@@ -586,6 +586,7 @@ The frontend is a React 19 + TypeScript single-page app that consumes only the e
 
 - `react-router-dom` v7 for routing, `@tanstack/react-query` v5 for server state, plain CSS (`src/styles.css`) with design tokens. No UI component framework was introduced.
 - Layers: `src/api/` (typed client + per-resource modules + DTOs), `src/auth/` (session-flag store, session provider, route guard), `src/lib/` (constants, formatting, permissions, shared form logic), `src/components/` (presentational), `src/pages/` (routes), `src/test/` (harness, fixtures).
+- **Geist is self-hosted.** The variable Geist and Geist Mono `woff2` files are copied into `public/fonts/` from the official `geist` npm package (v1.8.2, SIL OFL 1.1 — licence text kept beside them), so the app loads no font from a third-party CDN.
 
 **API access**
 
@@ -699,7 +700,7 @@ Scope constraints carried from the specification, followed by the limitations of
 - **Pagination is offset-based, not cursor-based**, matching what the API implements (`page`/`pageSize` with an exact `total`).
 - **The session credential lives in an `HttpOnly` cookie, so a page refresh keeps the user signed in.** Tokens are stateless and there is no server-side revocation list, so a leaked token remains valid until it expires; signing out clears the browser's copy (see *Authentication & Authorization* and `SECURITY_AUDIT.md`).
 - **Login throttling is per client address, not per account**, and the rate-limit counters live in the backend process's memory. Behind a reverse proxy every client would share one bucket, because `trust proxy` is not configured. See `SECURITY_AUDIT.md` M-01, M-02 and M-03.
-- **`drizzle-orm` is behind a published security advisory** (GHSA-gpj5-g38j-94v9). The vulnerable code path is not reachable in this codebase, and the fix requires a breaking major-version upgrade; the reasoning and the follow-up are recorded in `SECURITY_AUDIT.md` M-05.
+- **`drizzle-orm` is behind a published security advisory** (GHSA-gpj5-g38j-94v9 / CVE-2026-39356). No reachable use of the vulnerable identifier/alias API was found in `backend/src`, but that is a source-level observation, not a runtime proof. The fix is an effective-breaking upgrade of the data layer (`drizzle-orm` `0.36.4 → 0.45.4` plus `drizzle-kit` `0.28.1 → 0.31.x`) and is deferred pending an architect decision — see `SECURITY_AUDIT.md` M-05.
 
 ## Submission Information
 

@@ -35,7 +35,7 @@
 | TS-005 | ORM: Drizzle ORM | P0 | Documented exactly as specified | ARCHITECTURE.md §2 | Verified (documented) — and implemented |
 | TS-006 | Migration tooling: Drizzle Kit | P0 | Documented exactly as specified | ARCHITECTURE.md §2 | Verified (documented) — and implemented (`drizzle-kit`) |
 | TS-007 | Testing: Vitest + Supertest | P0 | Documented exactly as specified | ARCHITECTURE.md §2 | Verified (documented) — and implemented (both packages) |
-| TS-008 | Local dev: Docker Compose | P0 | Documented exactly as specified | ARCHITECTURE.md §2 | Verified (documented) — the stack table lists Docker Compose for local development. **Note:** the local run in this cycle used the hosted Neon database directly, so the Compose path is documented but was not exercised here |
+| TS-008 | Local dev: Docker Compose | P0 | Documented exactly as specified | ARCHITECTURE.md §2 | Verified (documented) — the stack table lists Docker Compose for local development. **Gaps:** no `docker-compose.yml` is present in the repository, the Docker daemon is unavailable on this machine, and the local run used the hosted Neon database directly. Nothing in the Compose path was executed, so this is a documentation claim only, not a tested setup |
 | TS-009 | Prisma is prohibited | P0 | Explicitly stated as prohibited | ARCHITECTURE.md §2 | Verified (documented) — stated as a prohibited constraint; no Prisma dependency present |
 | TS-010 | Architecture: modular monolith | P0 | Documented as modular monolith | ARCHITECTURE.md §2/§3 | Verified (documented) — and implemented as a modular monolith |
 
@@ -206,7 +206,7 @@ Every row above was re-checked against the repository and the test suites on 202
 
 **What is still not verified.** Two things were checked but could not be exercised in this environment, and are recorded as such rather than claimed as complete:
 
-- **Docker Compose (TS-008)** — the local-development stack is documented exactly as specified, but this run used the hosted Neon database directly, so the Compose path was never started.
-- **Outbox worker OS-signal delivery (RM-008)** — the shutdown *mechanism* is covered by the integration suite, but a programmatic `SIGTERM` is not delivered to a process on Windows, so the signal path itself is unverified on this platform.
+- **Docker Compose (TS-008)** — the local-development stack is documented exactly as specified, but no `docker-compose.yml` exists in the repository, the Docker daemon is unavailable on this machine, and this run used the hosted Neon database directly. The Compose path was never started and is not verified.
+- **Outbox worker OS-signal delivery (RM-008)** — the shutdown *mechanism* is covered by the integration suite, but a programmatic `SIGTERM` is not delivered to a process on Windows, so the signal path itself is unverified on this platform. The Docker daemon was unavailable, so a Linux-container SIGTERM test could not be run to close this gap either.
 
 **Note:** this checklist tracks the assignment's requirements. "Verified (implemented + tested)" means an automated test exists, was executed, and passed — it is not a claim that the feature is production-ready. The security posture of the result is reviewed separately in [`../SECURITY_AUDIT.md`](../SECURITY_AUDIT.md), which lists the findings that remain open.

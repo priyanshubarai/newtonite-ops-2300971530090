@@ -2,10 +2,10 @@
 
 **Target:** `backend/` (Express + TypeScript) and `frontend/` (React 19 + TypeScript SPA)
 **Audit date:** 2026-10-22
-**Code under audit:** working tree at `e67603f` plus the uncommitted stabilisation changes listed in §8
+**Code under audit:** `31de25b` (contains the stabilisation changes listed in §8, reviewed as working-tree changes on top of `e67603f`)
 **Method:** manual white-box review of every source file in `backend/src` and `frontend/src`, dependency audit (`npm audit`), live HTTP probing against the running app, and browser-driven verification of the authentication flow with Reticle.
 
-> **Tooling note.** The autonomous scanning agent (Strix) was not used: its self-hosted CLI requires Docker, which is not installed on this machine, and the published npm package could not be resolved. Every finding below was therefore produced by manual review and then **confirmed against the running application** rather than inferred from source alone. Findings marked *Verified* carry the exact command and observed output.
+> **Tooling note.** The autonomous scanning agent (Strix) was not used: its self-hosted CLI requires Docker, and this machine has no usable Docker engine (the `docker` CLI is installed, but `docker version` fails to reach the daemon). The published npm package could not be resolved either. Every finding below was therefore produced by manual review and then **confirmed against the running application** rather than inferred from source alone. Findings marked *Verified* carry the exact command and observed output.
 
 ---
 
@@ -19,7 +19,7 @@
 | **Low** | Defence-in-depth gap; no demonstrated attack path in the current design. |
 | **Info** | Correct behaviour worth recording, or an observation with no security impact. |
 
-**Status values used below:** `Fixed` (code changed and verified), `Open — accepted` (not fixed, with documented rationale and residual risk), `Open — deferred` (not fixed, with a scheduled follow-up).
+**Status values used below:** `Fixed` (code changed and verified), `Open — accepted` (not fixed, with documented rationale and residual risk), `Open — deferred` (not fixed, with a scheduled follow-up), `Requires Architect Review` (not fixed; the disposition depends on a material architectural trade-off that this hardening pass is not authorised to take).
 
 ---
 
@@ -34,7 +34,7 @@
 | Info | 3 | — | — |
 | **Total** | **20** | **6** | **11** |
 
-**No Critical or High finding remains open.** All Medium and Low findings are accepted risks with a recorded rationale; M-05 is the only item with a concrete follow-up action.
+**No Critical or High finding remains open.** M-01 to M-04 and the six Low findings are accepted risks with a recorded rationale. **M-05 is deferred and marked `Requires Architect Review`**: the vulnerable package is present, no reachable use of the vulnerable API was found, and the only fix is an effective-breaking upgrade of the whole data layer that needs its own regression pass and an explicit architectural decision.
 
 ### Finding index
 
@@ -50,7 +50,7 @@
 | M-02 | Rate-limit counters are per-process and in-memory | Medium | Open — accepted |
 | M-03 | `trust proxy` is not configured while `req.ip` drives throttling | Medium | Open — accepted |
 | M-04 | `/health` internal-IP check trusts a client-supplied `X-Forwarded-For` | Medium | Open — accepted |
-| M-05 | `drizzle-orm` in the range affected by CVE-2026-39356 | Medium | Open — deferred |
+| M-05 | `drizzle-orm` in the range affected by CVE-2026-39356 | Medium | Open — Requires Architect Review |
 | L-01 | CSP allows `'unsafe-inline'` for styles | Low | Open — accepted |
 | L-02 | No `Permissions-Policy` header | Low | Open — accepted |
 | L-03 | No password-complexity policy at the API boundary | Low | Open — accepted |
@@ -311,30 +311,42 @@ The clearing cookie repeats the original cookie's attributes (`Path`, `HttpOnly`
 
 ### M-05 — `drizzle-orm` in the range affected by CVE-2026-39356
 
-**Severity:** Medium (advisory severity: High / CVSS 7.5) · **Status:** Open — deferred
+**Severity:** Medium in this application (advisory severity: High / CVSS 3.1 7.5) · **Status:** Open — Requires Architect Review
 
-**Finding.** `npm audit --omit=dev` reports one high-severity advisory in the backend:
+**Advisory.** `npm audit --omit=dev` in `backend/` reports one high-severity advisory:
 
-```
-drizzle-orm <0.45.2
-Severity: high
-Drizzle ORM has SQL injection via improperly escaped SQL identifiers — GHSA-gpj5-g38j-94v9 / CVE-2026-39356
-fix available via npm audit fix --force   (installs drizzle-orm@0.45.4, a breaking change)
-```
+| Field | Value |
+|---|---|
+| Advisory | GHSA-gpj5-g38j-94v9 |
+| CVE | CVE-2026-39356 |
+| Title | Drizzle ORM has SQL injection via improperly escaped SQL identifiers |
+| Published | 2026-04-08 |
+| Advisory severity | High — CVSS 3.1 7.5 (`AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N`) |
+| Vulnerable ranges | `< 0.45.2` and `>= 1.0.0-beta.2, < 1.0.0-beta.20` |
+| Installed | `drizzle-orm@0.36.4` (inside the first range) |
+| First patched | `0.45.2`; `npm audit fix` targets `0.45.4` |
+| Related tooling | `drizzle-kit@0.28.1`; current line is `0.31.x` |
 
-Installed version: `drizzle-orm@0.36.4`.
+**What the flaw is.** In affected versions the dialect `escapeName()` helpers wrapped an identifier in quotes/backticks without first doubling a delimiter embedded in the value. An application that passes attacker-controlled text into APIs that build identifiers or aliases — `sql.identifier()`, dynamic `.as()` aliases, dynamic report builders, CTE names — can therefore break out of the quoted identifier and inject SQL. The advisory states that applications using only static schema objects, or that strictly map user input through an allowlist of known column or alias names, are not affected.
 
-**Why the vulnerable code path is not reachable.** The advisory states that the flaw affects *"applications that pass untrusted runtime input into APIs that construct SQL identifiers or aliases, such as `sql.identifier()`, `.as()`"*, and that *"applications that use only static schema objects, or that strictly map user input through an allowlist of known column or alias names, are not affected."* Verified in this codebase:
+**Reachability assessment.** No path from request input to identifier or alias construction was found in `backend/src`:
 
-- `grep "sql\.raw|sql\.identifier|\.as\(|ident\("` over `backend/src` → **no matches**. Neither the unsafe API nor any dynamic-identifier API is used.
-- Sorting — the one place where a client string could plausibly reach an identifier — is mapped through a **closed literal** of Drizzle column objects (`SORT_COLUMNS` in `backend/src/items/repository.ts`), and the request value is first constrained by `z.enum(SORT_FIELDS)` in `backend/src/items/validation.ts`. A client string can therefore never become an identifier.
-- Every other query uses Drizzle's parameterised builder, where user values are bound, not interpolated.
+- `grep -E 'sql\.identifier|sql\.raw|\.as\(|escapeName' backend/src` → **no matches**. None of the APIs the advisory names is called.
+- The only request-controlled value that influences query *shape* is sorting. It is resolved through a closed literal map of Drizzle column objects (`SORT_COLUMNS` in `backend/src/items/repository.ts`) after `z.enum(SORT_FIELDS)` has constrained it in `backend/src/items/validation.ts`; the value used for `ORDER BY` is always a schema object, never a string.
+- `sql` tagged templates are used (`now()`, `count(*)::int`, version increments, advisory locks, outbox `CASE` expressions), but every interpolated *value* is a bound parameter and every interpolated *identifier* is a schema object imported from `db/schema`. None is built from request text.
 
-**Why it is deferred.** The only published fix is `drizzle-orm ≥ 0.45.2`, a **major-version** upgrade of the entire data-access layer (from 0.36.x). That is a broad, breaking change touching every repository file and the migration tooling (`drizzle-kit@0.28.1`) — a materially larger and riskier change than the stabilisation this cycle was chartered for, and it would need its own regression pass against the real PostgreSQL suites.
+**Why that is not recorded as "not vulnerable".** The evidence above is a source-level observation, not a runtime proof: it shows that the vulnerable code path is not reachable *through the code as it stands today*. It cannot exclude a helper added later, a future dynamic sort/report feature, or a transitive use this review missed. The installed package remains in the affected range, so `npm audit` will keep reporting it and the exposure returns as soon as one of those APIs is introduced.
 
-**Residual risk.** Low, on the evidence above: no reachable path from request input to SQL identifier construction exists today. The risk is that a future change introduces one.
+**Why it is not fixed in this pass.** Remediation is `drizzle-orm` `0.36.4 → 0.45.4` (first patched `0.45.2`), which for a `0.x` package is an effective-major change to the whole data-access layer, plus `drizzle-kit` `0.28.1 → 0.31.x` for compatibility, migration regeneration, and a full regression run against the real PostgreSQL database. That is a broad, breaking data-layer migration rather than a hardening edit; taking it inside a stabilisation pass would trade a low, code-local risk for an unquantified migration risk. **The disposition requires an architect decision.**
 
-**Follow-up (concrete).** Schedule a dedicated upgrade: bump `drizzle-orm` to `≥ 0.45.2` and `drizzle-kit` to a compatible version, re-run `npm run db:generate` to confirm no migration drift, then run the full backend suite against the real database. Until then, add a lint rule or a review note forbidding `sql.raw()` / `sql.identifier()` / dynamic `.as()` in `backend/src`.
+**Residual risk.** Low in the code as reviewed. It is not closable by configuration and cannot be marked permanently accepted while the installed version stays in the affected range.
+
+**Architect decision required.** Choose one:
+
+1. **Schedule the upgrade** (recommended if the project continues): bump `drizzle-orm` to `^0.45.4` and `drizzle-kit` to `^0.31.11`, run `npm run db:generate` and confirm there is no unexpected migration diff, run the full backend suite (209 tests) and a manual smoke test against the real database, then re-run `npm audit --omit=dev` and confirm it reports zero findings.
+2. **Accept the residual risk explicitly** for a defined period, with the reachability evidence above as the justification and a review trigger (any new dynamic sort/report/alias feature, or the next dependency cycle).
+
+**Interim control (applies either way).** Treat `sql.identifier()`, `sql.raw()`, dynamic `.as()` aliases and any identifier built from request text as review-blocking in `backend/src`. The existing allowlist pattern in `repository.ts` is the approved way to vary query shape from input.
 
 ---
 

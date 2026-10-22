@@ -41,26 +41,26 @@
 }
 
 /* ==========================================================================
-   Premium Font - Geist (self-hosted)
+   Geist (self-hosted)
+   Both files are the variable (wght 100-900) builds shipped in the official
+   `geist` npm package v1.8.2 and copied into public/fonts (SIL OFL 1.1 -
+   see public/fonts/Geist-LICENSE.txt). Vite serves public/ at the site root,
+   so these resolve to real files with no third-party CDN request at runtime.
    ========================================================================== */
 @font-face {
   font-family: 'Geist';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/Geist-Variable.woff2') format('woff2-variations'),
-       url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/Geist-Regular.woff2') format('woff2');
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
-  font-stretch: 25% 151%;
 }
 
 @font-face {
   font-family: 'Geist Mono';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
-       url('https://cdn.jsdelivr.net/npm/geist@1.0.0/fonts/GeistMono-Regular.woff2') format('woff2');
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
-  font-stretch: 25% 151%;
 }
 
 :root {
