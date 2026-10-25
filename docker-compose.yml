@@ -1,0 +1,107 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: newtonite-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: newtonite
+      POSTGRES_USER: newtonite
+      POSTGRES_PASSWORD: newtonite
+    ports:
+      - "5432:5432"
+    volumes:
+      - newtonite_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newtonite -d newtonite"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migration
+    container_name: newtonite-migrate
+    command: sh -c "npm run db:migrate && npm run seed"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://newtonite:newtonite@db:5432/newtonite
+      JWT_SECRET: local-dev-jwt-secret-change-in-production-1234567890ab
+      JWT_EXPIRES_IN: 86400
+      CORS_ORIGIN: http://localhost:5173,http://frontend:5173
+      DEMO_PASSWORD: newtonite-demo
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newtonite-backend
+    command: sh -c "node dist/index.js"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://newtonite:newtonite@db:5432/newtonite
+      PORT: 3000
+      JWT_SECRET: local-dev-jwt-secret-change-in-production-1234567890ab
+      JWT_EXPIRES_IN: 86400
+      CORS_ORIGIN: http://localhost:5173,http://frontend:5173
+      DEMO_PASSWORD: newtonite-demo
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newtonite-worker
+    command: sh -c "node dist/worker.js"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://newtonite:newtonite@db:5432/newtonite
+      JWT_SECRET: local-dev-jwt-secret-change-in-production-1234567890ab
+      JWT_EXPIRES_IN: 86400
+      OUTBOX_POLL_INTERVAL_MS: 2000
+      OUTBOX_BATCH_SIZE: 10
+      OUTBOX_BACKOFF_BASE_MS: 5000
+      OUTBOX_BACKOFF_MAX_MS: 300000
+      OUTBOX_LEASE_TIMEOUT_MS: 60000
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: newtonite-frontend
+    environment:
+      VITE_API_URL: /api
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  newtonite_db_data:

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
-import { db, pool } from "./src/db/index.js";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import {
   users,
   teams,
@@ -11,6 +12,12 @@ import {
   comments,
 } from "./src/db/schema/index.js";
 import type { teamRoleEnum, workItemTypeEnum, workPriorityEnum, workStatusEnum } from "./src/db/schema/enums.js";
+
+// Use standard pg Pool (not neon-serverless) so seed works with local PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+const db = drizzle(pool);
 
 type Role = (typeof teamRoleEnum.enumValues)[number];
 type ItemType = (typeof workItemTypeEnum.enumValues)[number];

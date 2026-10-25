@@ -153,3 +153,49 @@ npm run build           # tsc && vite build
    - Identify unclear module boundaries, duplicated logic, and mixed responsibilities.
    - Refactor incrementally without changing established behavior.
    - Use focused tests to verify each refactor.
+## Docker (Local Setup) 
+
+The easiest way to run the full stack locally (frontend, backend API, PostgreSQL, worker) with migrations and demo data:
+
+### Prerequisites
+- Docker Engine and Docker Compose
+
+### Start the stack
+```bash
+docker-compose up --build
+```
+
+This will start:
+- PostgreSQL on 5432 (with a persistent named volume newtonite_db_data)
+- Migrate + seed (one-shot) - applies Drizzle migrations and seeds demo data
+- Backend API on http://localhost:3000 (health at http://localhost:3000/health)
+- Outbox worker (background)
+- Frontend on http://localhost:5173
+
+### Demo login credentials (password: newtonite-demo)
+| Role | Email | Team(s) & Role |
+|------|-------|----------------|
+| **Admin** | avery@newtonite.dev | Payments (Admin), Platform (Admin) |
+| **Lead** | blake@newtonite.dev | Payments (Lead), Support (Member) |
+| **Lead** | casey@newtonite.dev | Support (Lead) |
+| **Lead** | devon@newtonite.dev | Compliance (Lead) |
+| **Lead** | emery@newtonite.dev | Platform (Lead) |
+| **Member** | finley@newtonite.dev | Payments (Member), Compliance (Member) |
+| **Member** | gray@newtonite.dev | Support (Member) |
+| **Member** | harper@newtonite.dev | Compliance (Member), Platform (Member) |
+| **Viewer** | indigo@newtonite.dev | Payments (Viewer) |
+| **Viewer** | juniper@newtonite.dev | Support (Viewer) |
+
+### Stop the services
+```bash
+docker-compose down
+```
+
+### Reset the local database (deletes all local data)
+```bash
+docker-compose down -v
+```
+**Warning:** This permanently deletes the local PostgreSQL volume and all data.
+
+### Running tests
+Tests run outside Docker. See the test sections above.
