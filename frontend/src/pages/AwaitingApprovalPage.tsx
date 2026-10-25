@@ -59,7 +59,7 @@ function buildSortValue(sort: SortField, order: SortDirection): string {
 }
 
 export function AwaitingApprovalPage() {
-  const { memberships } = useAuth();
+  const { memberships, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -330,8 +330,14 @@ export function AwaitingApprovalPage() {
                     <td><TypeBadge type={item.type} /></td>
                     <td className="muted">{item.teamName}</td>
                     <td>
-                      {item.assigneeName ? (
-                        item.assigneeName
+                      {item.assigneeId ? (
+                        item.assigneeId === user?.id ? (
+                          "You"
+                        ) : (
+                          <span title={item.assigneeId} className="mono">
+                            {shortId(item.assigneeId)}
+                          </span>
+                        )
                       ) : (
                         <span className="muted">Unassigned</span>
                       )}

@@ -58,7 +58,7 @@ function buildSortValue(sort: SortField, order: SortDirection): string {
 }
 
 export function MyWorkPage() {
-  const { memberships } = useAuth();
+  const { memberships, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -307,8 +307,14 @@ export function MyWorkPage() {
                     <td><TypeBadge type={item.type} /></td>
                     <td className="muted">{item.teamName}</td>
                     <td>
-                      {item.assigneeName ? (
-                        item.assigneeName
+                      {item.assigneeId ? (
+                        item.assigneeId === user?.id ? (
+                          "You"
+                        ) : (
+                          <span title={item.assigneeId} className="mono">
+                            {shortId(item.assigneeId)}
+                          </span>
+                        )
                       ) : (
                         <span className="muted">Unassigned</span>
                       )}
