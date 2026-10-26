@@ -17,6 +17,23 @@ export const authRouter = Router();
 // response never discloses whether an email exists or an account is disabled.
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
 
+/**
+ * Cookie policy, shared by login and logout so the attributes used to clear the
+ * cookie always match the ones used to set it (mismatched attributes leave a
+ * credential behind on sign-out).
+ *
+ * `strict` is correct when the SPA and the API share a site (the bundled nginx
+ * setup). A deployment that serves them from different sites MUST set
+ * COOKIE_SAMESITE=none, otherwise the browser never sends the cookie and
+ * `/auth/me` answers 401 forever. `none` is only valid together with `Secure`,
+ * so it forces that flag on.
+ */
+const COOKIE_SAMESITE = (process.env.COOKIE_SAMESITE ?? "strict").toLowerCase() as
+  | "strict"
+  | "lax"
+  | "none";
+const COOKIE_SECURE = env.NODE_ENV === "production" || COOKIE_SAMESITE === "none";
+
 const loginSchema = z.object({
   email: z
     .string({ required_error: "email is required" })
@@ -71,11 +88,10 @@ authRouter.post("/login", (req, res) => {
     logger.info("Login successful", { requestId, userId: user.id, tag: "AUTH" });
     
     // Set token in HttpOnly cookie
-    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("auth_token", token, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: "strict",
+      secure: COOKIE_SECURE,
+      sameSite: COOKIE_SAMESITE,
       maxAge: env.JWT_EXPIRES_IN * 1000, // JWT_EXPIRES_IN is in seconds
       path: "/",
     });
@@ -104,8 +120,8 @@ authRouter.post("/login", (req, res) => {
 authRouter.post("/logout", (req, res) => {
   res.clearCookie("auth_token", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: COOKIE_SECURE,
+    sameSite: COOKIE_SAMESITE,
     path: "/",
   });
   return res.status(200).json({ message: "Logged out successfully" });

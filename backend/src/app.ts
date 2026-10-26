@@ -17,6 +17,13 @@ import { requestIdMiddleware, accessLogMiddleware, requestContextMiddleware } fr
  */
 const app = express();
 
+// Number of reverse-proxy hops to trust when deriving the client IP. Default 1
+// matches the bundled nginx -> backend topology. Behind an additional CDN or
+// load balancer set TRUST_PROXY_HOPS to the real hop count: too low and every
+// client shares the proxy's IP (one shared rate-limit bucket, spurious 429s);
+// too high and a client can spoof X-Forwarded-For.
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
 // Validate CORS configuration at startup (fails fast in production if misconfigured)
 validateCorsConfig();
 
@@ -72,19 +79,8 @@ app.use(accessLogMiddleware);
 // Request context middleware - attaches request ID to response locals for downstream use
 app.use(requestContextMiddleware);
 
-// General API rate limiting
-app.use(async (req, res, next) => {
-  try {
-    await apiLimiter.consume(req.ip ?? "unknown");
-    next();
-  } catch (rejRes) {
-    const rateLimitRes = rejRes as { msBeforeNext: number };
-    res.set("Retry-After", String(Math.ceil(rateLimitRes.msBeforeNext / 1000)));
-    res.status(429).json({ error: "Too many requests" });
-  }
-});
-
-// CORS middleware - configured from environment variable
+// CORS must run before rate limiting: a 429 answered without CORS headers is
+// an opaque CORS failure in the browser, which hides the real status.
 const corsOrigins = getCorsOrigins();
 app.use(
   cors({
@@ -95,6 +91,20 @@ app.use(
     maxAge: 86400, // 24 hours
   })
 );
+
+// General API rate limiting
+app.use(async (req, res, next) => {
+  // Preflights are not application traffic and must not consume the budget.
+  if (req.method === "OPTIONS") return next();
+  try {
+    await apiLimiter.consume(req.ip ?? "unknown");
+    next();
+  } catch (rejRes) {
+    const rateLimitRes = rejRes as { msBeforeNext: number };
+    res.set("Retry-After", String(Math.ceil(rateLimitRes.msBeforeNext / 1000)));
+    res.status(429).json({ error: "Too many requests" });
+  }
+});
 
 app.use(express.json());
 
@@ -118,6 +128,9 @@ app.get("/health", (req, res, next) => {
 
 // Login-specific rate limiting
 app.use("/auth/login", async (req, res, next) => {
+  // Only count real attempts. A cross-origin login is preceded by an OPTIONS
+  // preflight, which would otherwise spend 2 of the 5 points per attempt.
+  if (req.method === "OPTIONS") return next();
   try {
     await loginLimiter.consume(req.ip ?? "unknown");
     next();
