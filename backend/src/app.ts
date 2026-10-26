@@ -115,9 +115,12 @@ app.get("/health", (req, res, next) => {
   // In production, only allow from internal IPs or load balancer
   if (process.env.NODE_ENV === "production") {
     const internalIps = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
-    const forwardedFor = req.headers["x-forwarded-for"];
-    const firstForwarded = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(",")[0]?.trim();
-    const clientIp = firstForwarded || req.ip;
+    // Use Express' resolved client address only. Reading X-Forwarded-For
+    // directly took its LEFTMOST entry, which is client-supplied, so
+    // `X-Forwarded-For: 127.0.0.1` satisfied the internal check (M-04). With
+    // `trust proxy` set, req.ip is the rightmost untrusted hop - the value the
+    // proxy actually appended - and cannot be forged by the caller.
+    const clientIp = req.ip;
     
     if (!clientIp || !internalIps.includes(clientIp)) {
       return res.status(403).json({ error: "Forbidden" });

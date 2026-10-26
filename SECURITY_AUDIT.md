@@ -19,7 +19,7 @@
 | **Low** | Defence-in-depth gap; no demonstrated attack path in the current design. |
 | **Info** | Correct behaviour worth recording, or an observation with no security impact. |
 
-**Status values used below:** `Fixed` (code changed and verified), `Open — accepted` (not fixed, with documented rationale and residual risk), `Open — deferred` (not fixed, with a scheduled follow-up), `Requires Architect Review` (not fixed; the disposition depends on a material architectural trade-off that this hardening pass is not authorised to take).
+**Status values used below:** `Fixed` (code changed and verified), `Open — accepted` (not fixed, with documented rationale and residual risk), `Open — deferred` (not fixed, with a scheduled follow-up), `Requires Architect Review` (not fixed; the disposition depends on a material architectural trade-off that this hardening pass is not authorised to take), `Fixed in code — production verification pending` (changed and locally verified; deployed behaviour not yet observed), and `Open — configurable; production value unverified` (a configurable mechanism exists; the deployed value is unknown).
 
 ---
 
@@ -34,7 +34,7 @@
 | Info | 3 | — | — |
 | **Total** | **20** | **6** | **11** |
 
-**No Critical or High finding remains open.** M-01 to M-04 and the six Low findings are accepted risks with a recorded rationale. **M-05 is deferred and marked `Requires Architect Review`**: the vulnerable package is present, no reachable use of the vulnerable API was found, and the only fix is an effective-breaking upgrade of the whole data layer that needs its own regression pass and an explicit architectural decision.
+**No Critical or High finding remains open.** M-01, M-02, and the six Low findings are accepted risks with a recorded rationale. M-03 is configurable but its deployed value is unverified; M-04 is fixed in code with production verification pending. **M-05 is deferred and marked `Requires Architect Review`**: the vulnerable package is present, no reachable use of the vulnerable API was found, and the only fix is an effective-breaking upgrade of the whole data layer that needs its own regression pass and an explicit architectural decision.
 
 ### Finding index
 
@@ -48,8 +48,8 @@
 | H-01 | Sign-out did not invalidate the server session (cookie survived) | High | Fixed |
 | M-01 | No account-level lockout — throttling is IP-only | Medium | Open — accepted |
 | M-02 | Rate-limit counters are per-process and in-memory | Medium | Open — accepted |
-| M-03 | `trust proxy` is not configured while `req.ip` drives throttling | Medium | Open — accepted |
-| M-04 | `/health` internal-IP check trusts a client-supplied `X-Forwarded-For` | Medium | Open — accepted |
+| M-03 | `trust proxy` hop count is not verified against the deployed topology | Medium | Open — configurable; production value unverified |
+| M-04 | `/health` internal-IP check trusted a client-supplied `X-Forwarded-For` | Medium | Fixed in code — production verification pending |
 | M-05 | `drizzle-orm` in the range affected by CVE-2026-39356 | Medium | Open — Requires Architect Review |
 | L-01 | CSP allows `'unsafe-inline'` for styles | Low | Open — accepted |
 | L-02 | No `Permissions-Policy` header | Low | Open — accepted |
@@ -198,7 +198,7 @@ Origin-Agent-Cluster: ?1
 
 **Location.** `backend/src/app.ts`.
 
-**Evidence (live, after the fix).** In production the handler returns `403 { "error": "Forbidden" }` for a client address that is not `127.0.0.1`, `::1`, or `::ffff:127.0.0.1`. (The restriction is bypassable in a specific way — see **M-04** — but the endpoint's disclosure surface is small: it returns only `{"status":"ok","database":"healthy"}`.)
+**Evidence (live, after the fix).** In production the handler returns `403 { "error": "Forbidden" }` for a client address that is not `127.0.0.1`, `::1`, or `::ffff:127.0.0.1`. (The restriction was bypassable in a specific way - see **M-04** - but the endpoint's disclosure surface is small: it returns only `{"status":"ok","database":"healthy"}`. That bypass is now fixed in code.)
 
 **Remediation.** The route now checks `NODE_ENV === "production"` and the client address before delegating to `healthCheck`.
 
@@ -285,27 +285,31 @@ The clearing cookie repeats the original cookie's attributes (`Path`, `HttpOnly`
 
 ---
 
-### M-03 — `trust proxy` is not configured while `req.ip` drives throttling
+### M-03 — `trust proxy` hop count is not verified against the deployed topology
 
-**Severity:** Medium · **Status:** Open — accepted
+**Severity:** Medium · **Status:** Open — configurable; production value unverified
 
-**Finding.** Express' `trust proxy` setting is never configured (`grep "trust proxy" backend/src` → no matches), so `req.ip` is the TCP peer address. Behind a reverse proxy or load balancer every client therefore shares **one** rate-limit bucket: the whole site would be limited to 5 logins per minute collectively, and a single misbehaving client could lock out every user.
+**Finding (original).** Express' `trust proxy` setting was never configured, so `req.ip` was the TCP peer address. Behind a reverse proxy or load balancer every client shared **one** rate-limit bucket: the whole site would be limited to 5 logins per minute collectively, and a single misbehaving client could lock out every user.
 
-**Why it is not fixed.** The correct value depends on the deployment topology, which the repository cannot know. Enabling `trust proxy` without knowing the number of proxy hops would make the limit *less* accurate, not more.
+**Current state.** `app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1))`. The default of `1` matches the one reverse proxy in the bundled `docker-compose.yml` (nginx -> backend). Any other topology must set `TRUST_PROXY_HOPS` to its real hop count. With `1` and nginx's `$proxy_add_x_forwarded_for`, Express resolves the rightmost hop — the address the proxy appended — so a forged inbound `X-Forwarded-For` does not change the result.
 
-**Residual risk.** Medium — availability, not confidentiality. **Follow-up:** document `app.set("trust proxy", <hops>)` in the deployment guide for any hosted deployment, and confirm the hop count with the platform.
+**Why this is not marked resolved.** The option existing is not the same as the deployed value being correct. The repository cannot know how many proxies production has, and no production request has been observed to confirm per-client buckets. A wrong value is a real availability risk in both directions: too low and all clients share one bucket; too high and a client can spoof its address.
+
+**Residual risk.** Medium — availability, not confidentiality. **Follow-up:** confirm `TRUST_PROXY_HOPS` equals the number of trusted proxies in the deployed environment, then verify from two different client networks that each receives its own login allowance rather than sharing one.
 
 ---
 
-### M-04 — `/health` internal-IP check trusts a client-supplied `X-Forwarded-For`
+### M-04 — `/health` internal-IP check trusted a client-supplied `X-Forwarded-For`
 
-**Severity:** Medium · **Status:** Open — accepted
+**Severity:** Medium · **Status:** Fixed in code — production verification pending
 
-**Finding.** The production guard reads `req.headers["x-forwarded-for"]` directly, while `trust proxy` is **off** (M-03). Express therefore does not sanitise the header, and any client can send `X-Forwarded-For: 127.0.0.1` and satisfy the internal-address check, reaching `/health` in production.
+**Finding.** The production guard read `req.headers["x-forwarded-for"]` directly and took its **leftmost** entry, which is the one a caller controls. Any client could send `X-Forwarded-For: 127.0.0.1` and satisfy the internal-address check, reaching `/health` in production.
 
-**Why the severity is Medium rather than Critical.** The endpoint's disclosure surface is a single field pair — `{"status":"ok","database":"healthy"}`. It exposes no credentials, no version, no hostnames, no connection string, and no topology. The pre-fix exposure (C-05) was rated Critical because the endpoint was entirely open; the residual bypass is a partial re-open of a low-value endpoint.
+**Fix.** The raw-header read is removed. The guard now uses `req.ip` only; with `trust proxy` configured (M-03) that is the rightmost untrusted hop — the address the proxy appended — so an inbound header cannot forge it. The 403 for non-internal addresses is unchanged.
 
-**Residual risk.** Low-to-medium information disclosure about database reachability. **Follow-up:** resolve together with M-03 — read the client address through Express (`req.ip`) with `trust proxy` configured from the environment, rather than from a raw header.
+**Why the severity is Medium rather than Critical.** The endpoint's disclosure surface is a single field pair — `{"status":"ok","database":"healthy"}`. It exposes no credentials, no version, no hostnames, no connection string, and no topology. The pre-fix exposure (C-05) was rated Critical because the endpoint was entirely open; this bypass was a partial re-open of a low-value endpoint.
+
+**Residual risk.** Low — information disclosure about database reachability only, and only if M-03's hop count is wrong. **Follow-up:** after the deployment's hop count is confirmed, send `X-Forwarded-For: 127.0.0.1` to `/health` from an external address in production and confirm a 403.
 
 ---
 
@@ -404,7 +408,7 @@ The token payload is `{ sub }` plus the standard `iat`/`exp`/`iss`/`aud` claims.
 | `SECURITY_AUDIT.md` | This file, authored in this cycle. | Records the open findings, their residual risk, and the follow-ups. |
 | `README.md`, `docs/ASSIGNMENT_CHECKLIST.md`, `test-result.md` | Documentation reconciled with the code and the test results. | Records which requirements are implemented, which are tested, and which remain unverified. |
 
-**Files deliberately not touched.** `backend/package.json` (the `drizzle-orm` version), `backend/src/app.ts` (the `trust proxy` setting), and the seeded demo dataset. Each would have needed either a breaking dependency upgrade or a deployment-specific decision; see **M-02**, **M-03**, and **M-05** for the reasoning and the follow-up for each.
+**Files deliberately not touched.** `backend/package.json` (the `drizzle-orm` version) and the seeded demo dataset. Each would have needed either a breaking dependency upgrade or a deployment-specific decision; see **M-02**, **M-03**, and **M-05** for the reasoning and the follow-up for each.
 
 ---
 
